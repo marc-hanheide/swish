@@ -1,4 +1,4 @@
-span.twitter-typeahead .tt-dropdown-menu {
+span.twitter-typeahead .tt-menu {
   position: absolute;
   top: 100%;
   left: 0;
@@ -45,13 +45,13 @@ span.twitter-typeahead {
 .input-group span.twitter-typeahead {
   display: block !important;
 }
-.input-group span.twitter-typeahead .tt-dropdown-menu {
+.input-group span.twitter-typeahead .tt-menu {
   top: 32px !important;
 }
-.input-group.input-group-lg span.twitter-typeahead .tt-dropdown-menu {
+.input-group.input-group-lg span.twitter-typeahead .tt-menu {
   top: 44px !important;
 }
-.input-group.input-group-sm span.twitter-typeahead .tt-dropdown-menu {
+.input-group.input-group-sm span.twitter-typeahead .tt-menu {
   top: 28px !important;
 }
 
@@ -62,7 +62,7 @@ span.twitter-typeahead {
   padding-left: 1.5em;
 }
 
-.tt-suggestion .tt-match.file {
+.tt-match.file {
   background-size: 1em;
   background-repeat: no-repeat;
   background-position: 5px 5px;

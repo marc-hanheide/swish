@@ -16,8 +16,9 @@ require.config({
     "jquery-ui": "../bower_components/jquery-ui/jquery-ui.min",
     laconic:     "../bower_components/laconic/laconic",
     bootstrap:   "../bower_components/bootstrap/dist/js/bootstrap.min",
-    typeahead:   "../bower_components/typeahead.js/dist/typeahead.bundle.min",
-    splitter:    "../bower_components/jquery.splitter/js/jquery.splitter-0.14.0",
+    typeahead:   "../bower_components/typeahead.js/dist/typeahead.jquery",
+    bloodhound:  "../bower_components/typeahead.js/dist/bloodhound",
+    splitter:    "../bower_components/jquery.splitter/js/jquery.splitter-0.15.0",
     tagmanager:  "../bower_components/tagmanager/tagmanager",
     sha1:        "../bower_components/js-sha1/src/sha1",
 
@@ -56,6 +57,10 @@ require.config({
     },
     typeahead:
     { deps:["jquery"]
+    },
+    bloodhound:
+    { deps:["jquery"],
+      exports: "Bloodhound"
     },
     splitter:
     { deps:["jquery"]

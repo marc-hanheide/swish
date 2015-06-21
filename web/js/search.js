@@ -14,7 +14,7 @@
  * @requires jquery
  */
 
-define([ "jquery", "config", "typeahead" ],
+define([ "jquery", "config", "typeahead", "bloodhound" ],
        function($, config) {
 
 (function($) {
@@ -36,8 +36,12 @@ define([ "jquery", "config", "typeahead" ],
 
 	var files = new Bloodhound({
 			name: "files",
-			remote: config.http.locations.swish_typeahead +
-				"?set=file&q=%QUERY",
+			remote: {
+			  url: config.http.locations.swish_typeahead,
+			  replace: function(url, query) {
+			    return url + "?set=file&q=" + query;
+			  }
+			},
 			datumTokenizer: fileTokenizer,
 			queryTokenizer: Bloodhound.tokenizers.whitespace
 	               });
