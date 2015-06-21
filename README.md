@@ -18,6 +18,26 @@ get the dependencies:
 
     bower install
 
+**NOTE** There are now some issues with versions of dependencies:
+
+  - jquery.splitter uses the version in the file-name and therefore
+    the declarations in web/js/swish.js has to match the downloaded
+    version.
+  - twitter typeahead has gone through various changes.  SWISH now
+    demands 0.11.1.  Previous versions worked with 0.10.5.  See
+    5ff1ca34234c7a4ae4795d945e8e5a9b4aed844b for details.
+
+    You need to modify
+    `bower_components/typeahead.js/dist/typeahead.jquery.js`, changing
+
+    - `define("typeahead.js", [ "jquery" ], ...` into
+    - `define("typeahead", [ "jquery" ], ...` into
+
+    Without this, you get a JavaScript error
+    `TypeError: elem.typeahead is not a function` for `search.js`,
+    line 209.
+
+
 #### Download as zip
 
 As installing node and bower is not a pleasure on all operating systems,
