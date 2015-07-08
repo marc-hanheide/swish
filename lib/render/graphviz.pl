@@ -41,6 +41,35 @@
 :- register_renderer(graphviz, "Render data using graphviz").
 
 /** <module> Render data using graphviz
+
+This renderer exploits  [graphviz](http://www.graphviz.org)   to  render
+graphs from Prolog data. It takes two   representations.  The first is a
+straightforward term Program(String), e.g.,
+
+  ```
+  dot("digraph G {Hello->World}")
+  ```
+
+The   second   takes   a   Prolog    term     as    input.    The   [dot
+language](http://www.graphviz.org/content/dot-language)  is  represented
+as follows:
+
+  ```
+  Graph      := graph(Statements)
+              | graph(Options, Statements)
+	      | digraph(Statements)
+	      | digraph(Options, Statements)
+  Options    := ID | [ID] | [strict, ID]
+  Statements := List of statements
+  Statement  := NodeStm | EdgeStm | AttrStm | ID = ID | SubGraph
+  NodeStm    := NodeID | node(NodeID, AttrList)
+  NodeID     := ID | ID:Port | ID:Port:CompassPT
+  CompassPT  := n | ne | e | se | s | sw | w | nw | c | _
+  EdgeStm    := (NodeID|SubGraph) (EdgeOp (NodeID|SubGraph))+
+  EdgeStm     | edge(NodeID|SubGraph) (EdgeOp (NodeID|SubGraph))+), AttrList)
+  EdgeOp     := - | ->
+  SubGraph   := subgraph(ID, Statements)
+  ```
 */
 
 :- http_handler(swish(graphviz), swish_send_graphviz, []).
@@ -170,3 +199,132 @@ no_graph_viz(Renderer) -->
 		   'See ', a(href('http://www.graphviz.org/'),
 			     'http://www.graphviz.org/'), ' for details.'
 		 ])).
+
+
+		 /*******************************
+		 *   GENERATING A DOT PROGRAM	*
+		 *******************************/
+
+
+
+		 /*******************************
+		 *	  DOT PRIMITIVES	*
+		 *******************************/
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+This code is copied from ClioPatria, rdf_graphviz.pl
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+%%	write_attributes(+Attributes:list, +Out:stream) is det.
+%
+%	Write attribute values.  We define some special attributes:
+%
+%		* html(HTML)
+%		Emit as label=<HTML>
+
+write_attributes([], Out) :- !,
+	format(Out, ' []').
+write_attributes(List, Out) :- !,
+	format(Out, ' [', []),
+	write_attributes_2(List, Out),
+	format(Out, ']', []).
+
+write_attributes_2([], _).
+write_attributes_2([H|T], Out) :-
+	(   string_attribute(H)
+	->  H =.. [Att, Value],
+	    c_escape(Value, String),
+	    format(Out, ' ~w="~s"', [Att, String])
+	;   html_attribute(H, Att)
+	->  arg(1, H, Value),
+	    format(Out, ' ~w=<~s>', [Att, Value])
+	;   H =.. [Name, Value],
+	    format(Out, ' ~w=~w', [Name, Value])
+	),
+	write_attributes_2(T, Out).
+
+
+string_attribute(label(_)).
+string_attribute(url(_)).
+string_attribute(href(_)).
+string_attribute(id(_)).
+string_attribute('URL'(_)).
+string_attribute(fillcolor(_)).
+string_attribute(style(_)).
+
+html_attribute(html(_), label).
+
+c_escape(Atom, String) :-
+	atom_codes(Atom, Codes),
+	phrase(cstring(Codes), String).
+
+%%	gv_attr(?AttrName, ?Element, ?Type) is nondet.
+%
+%	Name and type-declarations for GraphViz   attributes.  Types are
+%	defined my must_be/2.
+%
+%	@see http://www.graphviz.org/doc/info/shapes.html
+
+gv_attr(align,	      table, oneof([center,left,right])).
+gv_attr(bgcolor,      table, atom).
+gv_attr(border,	      table, atom).
+gv_attr(cellborder,   table, atom).
+gv_attr(cellpadding,  table, atom).
+gv_attr(cellspacing,  table, atom).
+gv_attr(color,	      table, atom).
+gv_attr(fixedsize,    table, boolean).
+gv_attr(height,	      table, atom).
+gv_attr(href,	      table, atom).
+gv_attr(port,	      table, atom).
+gv_attr(target,	      table, atom).
+gv_attr(title,	      table, atom).
+gv_attr(tooltip,      table, atom).
+gv_attr(valign,	      table, oneof([middle,bottom,top])).
+gv_attr(width,	      table, atom).
+
+gv_attr(align,	      td,    oneof([center,left,right,text])).
+gv_attr(balign,	      td,    oneof([center,left,right])).
+gv_attr(bgcolor,      td,    atom).
+gv_attr(border,	      td,    atom).
+gv_attr(cellpadding,  td,    atom).
+gv_attr(cellspacing,  td,    atom).
+gv_attr(color,	      td,    atom).
+gv_attr(colspan,      td,    integer).
+gv_attr(fixedsize,    td,    boolean).
+gv_attr(height,	      td,    atom).
+gv_attr(href,	      td,    atom).
+gv_attr(port,	      td,    atom).
+gv_attr(rowspan,      td,    integer).
+gv_attr(target,	      td,    atom).
+gv_attr(title,	      td,    atom).
+gv_attr(tooltip,      td,    atom).
+gv_attr(valign,	      td,    oneof([middle,bottom,top])).
+gv_attr(width,	      td,    atom).
+
+gv_attr(color,	      font,  atom).
+gv_attr(face,	      font,  atom).
+gv_attr('point-size', font,  integer).
+
+gv_attr(align,	      br,    oneof([center,left,right])).
+
+gv_attr(scale,	      img,   oneof([false,true,width,height,both])).
+gv_attr(src,	      img,   atom).
+
+
+%%	cstring(+Codes)//
+%
+%	Create a C-string. =dot= uses UTF-8 encoding.
+
+cstring([]) -->
+	[].
+cstring([H|T]) -->
+	(   cchar(H)
+	->  []
+	;   [H]
+	),
+	cstring(T).
+
+cchar(0'") --> "\\\"".
+cchar(0'\n) --> "\\n".
+cchar(0'\t) --> "\\t".
+cchar(0'\b) --> "\\b".
