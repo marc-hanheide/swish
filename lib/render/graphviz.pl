@@ -36,6 +36,7 @@
 :- use_module(library(http/http_path)).
 :- use_module(library(process)).
 :- use_module(library(sgml)).
+:- use_module(library(debug)).
 :- use_module(library(dcg/basics)).
 :- use_module('../render').
 
@@ -62,13 +63,16 @@ as follows:
 	      | digraph(Options, Statements)
   Options    := ID | [ID] | [strict, ID]
   Statements := List of statements
-  Statement  := NodeStm | EdgeStm | AttrStm | ID = ID | SubGraph
+  Statement  := NodeStm | EdgeStm | AttrStm | Name = Value | SubGraph
   NodeStm    := NodeID | node(NodeID, AttrList)
   NodeID     := ID | ID:Port | ID:Port:CompassPT
   CompassPT  := n | ne | e | se | s | sw | w | nw | c | _
   EdgeStm    := (NodeID|SubGraph) (EdgeOp (NodeID|SubGraph))+
   EdgeStm     | edge(NodeID|SubGraph) (EdgeOp (NodeID|SubGraph))+), AttrList)
   EdgeOp     := - | ->
+  AttrStm    := graph(AttrList)
+	      | node(AttrList)
+	      | edge(AttrList)
   SubGraph   := subgraph(ID, Statements)
   ```
 */
@@ -113,6 +117,8 @@ render_dot(DOTString, Program, _Options) -->
 	     ]).
 
 %%	data_to_graphviz_string(+Data, -DOTString, -Program) is semidet.
+%
+%	Extract the DOT data and graphviz program to run on the data.
 
 data_to_graphviz_string(Compound, String, Program) :-
 	compound(Compound),
@@ -124,6 +130,15 @@ data_to_graphviz_string(Compound, String, Program) :-
 	    string_codes(String, Codes),
 	    debug(graphviz, '~s', [String])
 	).
+data_to_graphviz_string(Compound, String, dot) :-
+	compound(Compound),
+	compound_name_arity(Compound, Type, Arity),
+	graph_type(Type),
+	between(1,2,Arity), !,
+	phrase(graph(Compound), Codes),
+	string_codes(String, Codes),
+	debug(graphviz, '~s', [String]).
+
 
 graphviz_program(dot).
 graphviz_program(neato).
@@ -131,6 +146,9 @@ graphviz_program(fdp).
 graphviz_program(sfdp).
 graphviz_program(twopi).
 graphviz_program(circo).
+
+graph_type(graph).
+graph_type(digraph).
 
 %%	swish_send_graphviz(+Request)
 %
@@ -242,7 +260,7 @@ statements([H|T]) --> "  ", statement(H), ";",  nl, statements(T).
 statement(graph(Attrs)) --> keyword(graph), ws, attributes(Attrs).
 statement(edge(Attrs)) --> keyword(edge), ws, attributes(Attrs).
 statement(node(Attrs)) --> keyword(node), ws, attributes(Attrs).
-statement(node(ID, Attrs)) --> !, id(ID), ws, attributes(Attrs).
+statement(node(ID, Attrs)) --> !, node(ID), ws, attributes(Attrs).
 statement(edge(Edge, Attrs)) --> !, edge(Edge), ws, attributes(Attrs).
 statement(A - B) --> !, edge(A - B).
 statement(A -> B) --> !, edge(A -> B).
@@ -255,11 +273,35 @@ statement(subgraph(ID, Statements)) --> !,
 	statements(Statements), "}".
 
 edge((A-B)-C) --> !, edge(A-B), " -- ", id(C).
-edge(A-(B-C)) --> !, id(A), " -- ", edge(B-C).
-edge(A-B)     --> id(A), " -- ", id(B).
-edge((A->B)->C) --> !, edge(A->B), " -> ", id(C).
-edge(A->(B->C)) --> !, id(A), " -> ", edge(B->C).
-edge(A->B)      --> id(A), " -> ", id(B).
+edge(A-(B-C)) --> !, node(A), " -- ", edge(B-C).
+edge(A-B)     --> node(A), " -- ", node(B).
+edge((A->B)->C) --> !, edge(A->B), " -> ", node(C).
+edge(A->(B->C)) --> !, node(A), " -> ", edge(B->C).
+edge(A->B)      --> node(A), " -> ", node(B).
+
+node(ID:Port:Compass) --> !,
+	id(ID), ":", id(Port), ":", compass(Compass).
+node(ID:Port) --> !,
+	id(ID), ":", id(Port).
+node(ID) --> !,
+	id(ID).
+
+compass(Compass) -->
+	{ compass(Compass) },
+	atom(Compass).
+compass(Compass) -->
+	{ domain_error(compass, Compass) }.
+
+compass('_') :- !.	% handles variables
+compass(n).
+compass(ne).
+compass(e).
+compass(se).
+compass(s).
+compass(sw).
+compass(w).
+compass(nw).
+compass(c).
 
 attributes([]) --> !.
 attributes(List) --> "[", attribute_list(List), "]".
