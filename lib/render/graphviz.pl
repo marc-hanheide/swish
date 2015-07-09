@@ -235,25 +235,31 @@ graph(graph(Statements)) -->
 graph(digraph(Statements)) -->
 	graph(digraph([], Statements)).
 graph(graph(Options, Statements)) -->
-	graph(graph, Options, Statements).
+	{graph_options(Options, graph, Ctx)},
+	graph(Statements, Ctx).
 graph(digraph(Options, Statements)) -->
-	graph(digraph, Options, Statements).
+	{graph_options(Options, digraph, Ctx)},
+	graph(Statements, Ctx).
 
-graph(Type, Options, Statements) -->
-	{ must_be(list, Options) }, !,
-	strict(Options, Options1), keyword(Type), ws, graph_id(Options1),
+graph_options([], Type, gv{type:Type}).
+graph_options([strict], Type, gv{strict:true, type:Type}).
+graph_options([strict, ID], Type, gv{strict:true, id:ID, type:Type}).
+
+graph(Statements, Options) -->
+	strict(Options), keyword(Options.type), ws, graph_id(Options),
 	"{", nl,
 	statements(Statements),
 	"}", nl.
 
-strict(Options0, Options) -->
-	{ selectchk(strict, Options0, Options) }, !,
+strict(Options) -->
+	{ true == Options.get(strict) }, !,
 	keyword(strict).
-strict(Options, Options) --> [].
+strict(_Options) --> [].
 
-graph_id([ID]) --> !,
+graph_id(Options) -->
+	{ ID = Options.get(id) }, !,
 	id(ID), ws.
-graph_id([]) --> [].
+graph_id(_) --> [].
 
 statements([]) --> [].
 statements([H|T]) --> "  ", statement(H), ";",  nl, statements(T).
