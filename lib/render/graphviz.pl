@@ -121,7 +121,8 @@ data_to_graphviz_string(Compound, String, Program) :-
 	(   atomic(Data)
 	->  String = Data
 	;   phrase(graph(Data), Codes),
-	    string_codes(String, Codes)
+	    string_codes(String, Codes),
+	    debug(graphviz, '~s', [String])
 	).
 
 graphviz_program(dot).
@@ -244,18 +245,20 @@ statement(node(Attrs)) --> keyword(node), ws, attributes(Attrs).
 statement(node(ID, Attrs)) --> !, id(ID), ws, attributes(Attrs).
 statement(edge(Edge, Attrs)) --> !, edge(Edge), ws, attributes(Attrs).
 statement(A - B) --> !, edge(A - B).
-statement(A -> B) --> !, edge(A - B).
-statement(ID1 = ID2) --> !, id(ID1), ws, "=", ws, id(ID2).
+statement(A -> B) --> !, edge(A -> B).
+statement(Name = Value) --> !, attribute(Name=Value).
 statement(subgraph(Statements)) --> !,
 	keyword(subgraph), ws, "{", nl,
-	Statements, "}".
+	statements(Statements), "}".
 statement(subgraph(ID, Statements)) --> !,
 	keyword(subgraph), ws, id(ID), ws, "{", nl,
-	Statements, "}".
+	statements(Statements), "}".
 
 edge((A-B)-C) --> !, edge(A-B), " -- ", id(C).
+edge(A-(B-C)) --> !, id(A), " -- ", edge(B-C).
 edge(A-B)     --> id(A), " -- ", id(B).
-edge((A->B)->C) --> !, edge(A-B), " -> ", id(C).
+edge((A->B)->C) --> !, edge(A->B), " -> ", id(C).
+edge(A->(B->C)) --> !, id(A), " -> ", edge(B->C).
 edge(A->B)      --> id(A), " -> ", id(B).
 
 attributes([]) --> !.
@@ -270,12 +273,12 @@ attribute_list([H|T]) -->
 	).
 
 attribute(Name=Value) -->
-	id(Name),"=",value(Name, Value).
+	atom(Name),"=",value(Name, Value).
 attribute(html(Value), List, Tail) :- !,
 	format(codes(List,Tail), 'label=<~w>', [Value]).
 attribute(NameValue)  -->
 	{NameValue =.. [Name,Value]}, !,
-	id(Name),"=",value(Name, Value).
+	atom(Name),"=",value(Name, Value).
 
 value(Name, Value) -->
 	{ string_attribute(Name), !,
@@ -301,13 +304,13 @@ nl --> "\n".
 This code is copied from ClioPatria, rdf_graphviz.pl
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-string_attribute(label(_)).
-string_attribute(url(_)).
-string_attribute(href(_)).
-string_attribute(id(_)).
-string_attribute('URL'(_)).
-string_attribute(fillcolor(_)).
-string_attribute(style(_)).
+string_attribute(label).
+string_attribute(url).
+string_attribute(href).
+string_attribute(id).
+string_attribute('URL').
+string_attribute(fillcolor).
+string_attribute(style).
 
 %%	gv_attr(?AttrName, ?Element, ?Type) is nondet.
 %
