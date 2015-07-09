@@ -36,6 +36,7 @@
 :- use_module(library(http/http_path)).
 :- use_module(library(process)).
 :- use_module(library(sgml)).
+:- use_module(library(dcg/basics)).
 :- use_module('../render').
 
 :- register_renderer(graphviz, "Render data using graphviz").
@@ -115,8 +116,13 @@ render_dot(DOTString, Program, _Options) -->
 
 data_to_graphviz_string(Compound, String, Program) :-
 	compound(Compound),
-	compound_name_arguments(Compound, Program, [String]),
-	graphviz_program(Program).
+	compound_name_arguments(Compound, Program, [Data]),
+	graphviz_program(Program),
+	(   atomic(Data)
+	->  String = Data
+	;   phrase(graph(Data), Codes),
+	    string_codes(String, Codes)
+	).
 
 graphviz_program(dot).
 graphviz_program(neato).
@@ -205,6 +211,86 @@ no_graph_viz(Renderer) -->
 		 *   GENERATING A DOT PROGRAM	*
 		 *******************************/
 
+graph(graph(Statements)) -->
+	graph(graph([], Statements)).
+graph(digraph(Statements)) -->
+	graph(digraph([], Statements)).
+graph(graph(Options, Statements)) -->
+	graph(graph, Options, Statements).
+graph(digraph(Options, Statements)) -->
+	graph(digraph, Options, Statements).
+
+graph(Type, Options, Statements) -->
+	{ must_be(list, Options) }, !,
+	strict(Options, Options1), keyword(Type), ws, graph_id(Options1), "{", nl,
+	statements(Statements),
+	"}", nl.
+
+strict(Options0, Options) -->
+	{ selectchk(strict, Options0, Options) }, !,
+	keyword(strict).
+strict(Options, Options) --> [].
+
+graph_id([ID]) --> !,
+	id(ID), ws.
+graph_id([]) --> [].
+
+statements([]) --> [].
+statements([H|T]) --> "  ", statement(H), ";",  nl, statements(T).
+
+statement(graph(Attrs)) --> keyword(graph), ws, attributes(Attrs).
+statement(edge(Attrs)) --> keyword(edge), ws, attributes(Attrs).
+statement(node(Attrs)) --> keyword(node), ws, attributes(Attrs).
+statement(node(ID, Attrs)) --> !, id(ID), ws, attributes(Attrs).
+statement(edge(Edge, Attrs)) --> !, edge(Edge), ws, attributes(Attrs).
+statement(A - B) --> !, edge(A - B).
+statement(A -> B) --> !, edge(A - B).
+statement(ID1 = ID2) --> !, id(ID1), ws, "=", ws, id(ID2).
+statement(subgraph(Statements)) --> !,
+	keyword(subgraph), ws, "{", nl,
+	Statements, "}".
+statement(subgraph(ID, Statements)) --> !,
+	keyword(subgraph), ws, id(ID), ws, "{", nl,
+	Statements, "}".
+
+edge((A-B)-C) --> !, edge(A-B), " -- ", id(C).
+edge(A-B)     --> id(A), " -- ", id(B).
+edge((A->B)->C) --> !, edge(A-B), " -> ", id(C).
+edge(A->B)      --> id(A), " -> ", id(B).
+
+attributes([]) --> !.
+attributes(List) --> "[", attribute_list(List), "]".
+
+attribute_list([]) --> [].
+attribute_list([H|T]) -->
+	attribute(H),
+	(   {T == []}
+	->  []
+	;   ",", attribute_list(T)
+	).
+
+attribute(Name=Value) -->
+	id(Name),"=",value(Name, Value).
+attribute(html(Value), List, Tail) :- !,
+	format(codes(List,Tail), 'label=<~w>', [Value]).
+attribute(NameValue)  -->
+	{NameValue =.. [Name,Value]}, !,
+	id(Name),"=",value(Name, Value).
+
+value(Name, Value) -->
+	{ string_attribute(Name), !,
+	  atom_codes(Value, Codes)
+	},
+	"\"", cstring(Codes), "\"".
+value(_Name, Value, List, Tail) :-
+	format(codes(List,Tail), '~w', [Value]).
+
+id(ID) --> { number(ID) }, !, number(ID).
+id(ID) --> { atom_codes(ID, Codes) }, "\"", cstring(Codes), "\"".
+
+keyword(Kwd) --> atom(Kwd).
+ws --> " ".
+nl --> "\n".
 
 
 		 /*******************************
@@ -215,35 +301,6 @@ no_graph_viz(Renderer) -->
 This code is copied from ClioPatria, rdf_graphviz.pl
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-%%	write_attributes(+Attributes:list, +Out:stream) is det.
-%
-%	Write attribute values.  We define some special attributes:
-%
-%		* html(HTML)
-%		Emit as label=<HTML>
-
-write_attributes([], Out) :- !,
-	format(Out, ' []').
-write_attributes(List, Out) :- !,
-	format(Out, ' [', []),
-	write_attributes_2(List, Out),
-	format(Out, ']', []).
-
-write_attributes_2([], _).
-write_attributes_2([H|T], Out) :-
-	(   string_attribute(H)
-	->  H =.. [Att, Value],
-	    c_escape(Value, String),
-	    format(Out, ' ~w="~s"', [Att, String])
-	;   html_attribute(H, Att)
-	->  arg(1, H, Value),
-	    format(Out, ' ~w=<~s>', [Att, Value])
-	;   H =.. [Name, Value],
-	    format(Out, ' ~w=~w', [Name, Value])
-	),
-	write_attributes_2(T, Out).
-
-
 string_attribute(label(_)).
 string_attribute(url(_)).
 string_attribute(href(_)).
@@ -251,12 +308,6 @@ string_attribute(id(_)).
 string_attribute('URL'(_)).
 string_attribute(fillcolor(_)).
 string_attribute(style(_)).
-
-html_attribute(html(_), label).
-
-c_escape(Atom, String) :-
-	atom_codes(Atom, Codes),
-	phrase(cstring(Codes), String).
 
 %%	gv_attr(?AttrName, ?Element, ?Type) is nondet.
 %
