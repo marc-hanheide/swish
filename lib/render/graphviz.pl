@@ -241,14 +241,17 @@ graph(digraph(Options, Statements)) -->
 	{graph_options(Options, digraph, Ctx)},
 	graph(Statements, Ctx).
 
-graph_options([], Type, gv{type:Type}).
-graph_options([strict], Type, gv{strict:true, type:Type}).
-graph_options([strict, ID], Type, gv{strict:true, id:ID, type:Type}).
+graph_options([], Type,
+	      gv{type:Type, indent:2}).
+graph_options([strict], Type,
+	      gv{strict:true, type:Type, indent:2}).
+graph_options([strict, ID], Type,
+	      gv{strict:true, id:ID, type:Type, indent:2}).
 
 graph(Statements, Options) -->
 	strict(Options), keyword(Options.type), ws, graph_id(Options),
 	"{", nl,
-	statements(Statements),
+	statements(Statements, Options),
 	"}", nl.
 
 strict(Options) -->
@@ -261,36 +264,44 @@ graph_id(Options) -->
 	id(ID), ws.
 graph_id(_) --> [].
 
-statements([]) --> [].
-statements([H|T]) --> "  ", statement(H), ";",  nl, statements(T).
+statements([], _) --> [].
+statements([H|T], Options) -->
+	indent(Options), statement(H, Options), ";", nl,
+	statements(T, Options).
 
-statement(graph(Attrs)) --> keyword(graph), ws, attributes(Attrs).
-statement(edge(Attrs)) --> keyword(edge), ws, attributes(Attrs).
-statement(node(Attrs)) --> keyword(node), ws, attributes(Attrs).
-statement(node(ID, Attrs)) --> !, node(ID), ws, attributes(Attrs).
-statement(edge(Edge, Attrs)) --> !, edge(Edge), ws, attributes(Attrs).
-statement(A - B) --> !, edge(A - B).
-statement(A -> B) --> !, edge(A -> B).
-statement(Name = Value) --> !, attribute(Name=Value).
-statement(subgraph(Statements)) --> !,
+statement(graph(Attrs), O) --> keyword(graph), ws, attributes(Attrs, O).
+statement(edge(Attrs), O) --> keyword(edge), ws, attributes(Attrs, O).
+statement(node(Attrs), O) --> keyword(node), ws, attributes(Attrs, O).
+statement(node(ID, Attrs), O) --> !, node(ID, O), ws, attributes(Attrs, O).
+statement(edge(Edge, Attrs), O) --> !, edge(Edge, O), ws, attributes(Attrs, O).
+statement(A - B, O) --> !, edge(A - B, O).
+statement(A -> B, O) --> !, edge(A -> B, O).
+statement(Name = Value, O) --> !, attribute(Name=Value, O).
+statement(subgraph(Statements), O) --> !,
+	{ step_indent(O, O1) },
 	keyword(subgraph), ws, "{", nl,
-	statements(Statements), "}".
-statement(subgraph(ID, Statements)) --> !,
+	statements(Statements, O1), indent(O), "}".
+statement(subgraph(ID, Statements), O) --> !,
+	{ step_indent(O, O1) },
 	keyword(subgraph), ws, id(ID), ws, "{", nl,
-	statements(Statements), "}".
+	statements(Statements, O1), indent(O), "}".
 
-edge((A-B)-C) --> !, edge(A-B), " -- ", id(C).
-edge(A-(B-C)) --> !, node(A), " -- ", edge(B-C).
-edge(A-B)     --> node(A), " -- ", node(B).
-edge((A->B)->C) --> !, edge(A->B), " -> ", node(C).
-edge(A->(B->C)) --> !, node(A), " -> ", edge(B->C).
-edge(A->B)      --> node(A), " -> ", node(B).
+step_indent(O, O2) :-
+	I is O.indent+2,
+	O2 = O.put(indent, I).
 
-node(ID:Port:Compass) --> !,
+edge((A-B)-C, O)   --> !, edge(A-B, O), " -- ", id(C).
+edge(A-(B-C), O)   --> !, node(A, O), " -- ", edge(B-C, O).
+edge(A-B, O)       --> node(A, O), " -- ", node(B, O).
+edge((A->B)->C, O) --> !, edge(A->B, O), " -> ", node(C, O).
+edge(A->(B->C), O) --> !, node(A, O), " -> ", edge(B->C, O).
+edge(A->B, O)      --> node(A, O), " -> ", node(B, O).
+
+node(ID:Port:Compass, _O) --> !,
 	id(ID), ":", id(Port), ":", compass(Compass).
-node(ID:Port) --> !,
+node(ID:Port, _O) --> !,
 	id(ID), ":", id(Port).
-node(ID) --> !,
+node(ID, _O) --> !,
 	id(ID).
 
 compass(Compass) -->
@@ -310,22 +321,22 @@ compass(w).
 compass(nw).
 compass(c).
 
-attributes([]) --> !.
-attributes(List) --> "[", attribute_list(List), "]".
+attributes([], _) --> !.
+attributes(List, O) --> "[", attribute_list(List, O), "]".
 
-attribute_list([]) --> [].
-attribute_list([H|T]) -->
-	attribute(H),
+attribute_list([], _) --> [].
+attribute_list([H|T], O) -->
+	attribute(H, O),
 	(   {T == []}
 	->  []
-	;   ",", attribute_list(T)
+	;   ",", attribute_list(T, O)
 	).
 
-attribute(Name=Value) -->
+attribute(Name=Value, _O) -->
 	atom(Name),"=",value(Name, Value).
-attribute(html(Value), List, Tail) :- !,
+attribute(html(Value), _, List, Tail) :- !,
 	format(codes(List,Tail), 'label=<~w>', [Value]).
-attribute(NameValue)  -->
+attribute(NameValue, _O)  -->
 	{NameValue =.. [Name,Value]}, !,
 	atom(Name),"=",value(Name, Value).
 
@@ -341,8 +352,18 @@ id(ID) --> { number(ID) }, !, number(ID).
 id(ID) --> { atom_codes(ID, Codes) }, "\"", cstring(Codes), "\"".
 
 keyword(Kwd) --> atom(Kwd).
+indent(Options) -->
+	{ Level = Options.indent },
+	spaces(Level).
 ws --> " ".
 nl --> "\n".
+
+spaces(0) --> !.
+spaces(N) -->
+	{ succ(N2, N) },
+	" ",
+	spaces(N2).
+
 
 
 		 /*******************************
