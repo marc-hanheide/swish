@@ -241,7 +241,8 @@ graph(digraph(Options, Statements)) -->
 
 graph(Type, Options, Statements) -->
 	{ must_be(list, Options) }, !,
-	strict(Options, Options1), keyword(Type), ws, graph_id(Options1), "{", nl,
+	strict(Options, Options1), keyword(Type), ws, graph_id(Options1),
+	"{", nl,
 	statements(Statements),
 	"}", nl.
 
