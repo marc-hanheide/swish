@@ -37,6 +37,7 @@
 :- use_module(library(process)).
 :- use_module(library(sgml)).
 :- use_module(library(debug)).
+:- use_module(library(option)).
 :- use_module(library(dcg/basics)).
 :- use_module('../render').
 
@@ -73,6 +74,9 @@ as follows:
   AttrStm    := graph(AttrList)
 	      | node(AttrList)
 	      | edge(AttrList)
+  AttrList   := List of attributes
+  Attribute  := Name = Value
+	      | Name(Value)
   SubGraph   := subgraph(ID, Statements)
   ```
 */
@@ -84,36 +88,30 @@ as follows:
 
 %%	term_rendering(+Term, +Vars, +Options)//
 %
-%	Renders data using graphviz.
+%	Renders data using graphviz.  Options:
+%
+%	  - svg(+Mode)
+%	  One of `inline` (default) or `object`, rendering the SVG using
+%	  an HTML <object> element.
 
-term_rendering(Data, _Vars, Options) -->
-	{ data_to_graphviz_string(Data, DOTString, Program)
+term_rendering(Data, Vars, Options) -->
+	{ debug(graphviz(vars), 'Data: ~q, vars: ~p', [Data, Vars]),
+	  data_to_graphviz_string(Data, DOTString, Program)
 	},
 	render_dot(DOTString, Program, Options).
 
 %%	render_dot(+DotString, +Program, +Options)// is det.
 %
-%	Render a dot program. First checks  whether dot is available. It
-%	has two modes,  produding  inline  SVG   or  producing  an  HTML
+%	Render a dot program. First checks whether Program is available.
+%	It has two modes, produding  inline   SVG  or  producing an HTML
 %	<object> element, which calls the server again to fetch the SVG.
-%
-%	@tbd: Do we still need the <object> route?  How to select it?
-%	@tbd: Catch the error from Program and generate a div holding
-%	this.
 
 render_dot(_DOTString, Program, _Options) -->
 	{ \+ has_graphviz_renderer(Program) }, !,
 	no_graph_viz(Program).
-render_dot(DOTString, Program, _Options) --> !,
-	{ graphviz_stream(_{program:Program, dot:DOTString}, PID, XDotOut),
-	  call_cleanup(read_string(XDotOut, _, SVG),
-		       (    process_wait(PID, _Status),
-			    close(XDotOut)
-		       ))
-	},
-	html(\[SVG]).
-render_dot(DOTString, Program, _Options) -->
-	{ variant_sha1(DOTString, Hash),
+render_dot(DOTString, Program, Options) -->	% <object> rendering
+	{ option(svg(object), Options, inline), !,
+          variant_sha1(DOTString, Hash),
 	  get_time(Now),
 	  assert(dot_data(Hash,
 			  _{ program: Program,
@@ -133,6 +131,21 @@ render_dot(DOTString, Program, _Options) -->
 		      ],
 		      [])
 	     ]).
+render_dot(DOTString, Program, _Options) -->	% <svg> rendering
+	{ graphviz_stream(_{program:Program, dot:DOTString},
+			  PID, XDotOut, ErrorOut),
+	  call_cleanup((   read_string(XDotOut, _, SVG),
+			   read_string(ErrorOut, _, Error)
+		       ),
+		       (   process_wait(PID, _Status),
+			   close(XDotOut)
+		       ))
+	},
+	(   { Error == "" }
+	->  html(\[SVG])
+	;   html(div(style('color:red;'),
+		     [ '~w'-[Program], ': ', Error]))
+	).
 
 %%	data_to_graphviz_string(+Data, -DOTString, -Program) is semidet.
 %
@@ -179,23 +192,30 @@ swish_send_graphviz(Request) :-
 			       ])
 			]),
 	dot_data(Hash, Data, _),
-	graphviz_stream(Data, PID, XDotOut),
-	call_cleanup(load_structure(stream(XDotOut),
-				    SVGDom0,
-				    [ dialect(xml) ]),
+	graphviz_stream(Data, PID, XDotOut, ErrorOut),
+	call_cleanup(( load_structure(stream(XDotOut),
+				      SVGDom0,
+				      [ dialect(xml) ]),
+		       read_string(ErrorOut, _, Error)
+		     ),
 		     (	 process_wait(PID, _Status),
 			 close(XDotOut)
 		     )),
+	(   Error == ""
+	->  true
+	;   print_message(error, format('~w', [Error]))
+	),
 	rewrite_sgv_dom(SVGDom0, SVGDom),
 	format('Content-type: ~w~n~n', ['image/svg+xml; charset=UTF-8']),
 	xml_write(current_output, SVGDom,
 		  [ layout(false)
 		  ]).
 
-graphviz_stream(Data, PID, XDotOut) :-
+graphviz_stream(Data, PID, XDotOut, Error) :-
 	process_create(path(Data.program), ['-Tsvg'],
 		       [ stdin(pipe(ToDOT)),
 			 stdout(pipe(XDotOut)),
+			 stderr(pipe(Error)),
 			 process(PID)
 		       ]),
 	set_stream(ToDOT, encoding(utf8)),
