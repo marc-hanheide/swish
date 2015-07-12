@@ -266,22 +266,26 @@ graph_id(_) --> [].
 
 statements([], _) --> [].
 statements([H|T], Options) -->
-	indent(Options), statement(H, Options), ";", nl,
+	indent(Options),
+	(   statement(H, Options)
+	->  ";", nl
+	;   {domain_error(graphviz_statement, H)}
+	),
 	statements(T, Options).
 
 statement(graph(Attrs), O) --> keyword(graph), ws, attributes(Attrs, O).
 statement(edge(Attrs), O) --> keyword(edge), ws, attributes(Attrs, O).
 statement(node(Attrs), O) --> keyword(node), ws, attributes(Attrs, O).
-statement(node(ID, Attrs), O) --> !, node(ID, O), ws, attributes(Attrs, O).
-statement(edge(Edge, Attrs), O) --> !, edge(Edge, O), ws, attributes(Attrs, O).
-statement(A - B, O) --> !, edge(A - B, O).
-statement(A -> B, O) --> !, edge(A -> B, O).
-statement(Name = Value, O) --> !, attribute(Name=Value, O).
-statement(subgraph(Statements), O) --> !,
+statement(node(ID, Attrs), O) --> node(ID, O), ws, attributes(Attrs, O).
+statement(edge(Edge, Attrs), O) --> edge(Edge, O), ws, attributes(Attrs, O).
+statement(A - B, O) --> edge(A - B, O).
+statement(A -> B, O) --> edge(A -> B, O).
+statement(Name = Value, O) --> attribute(Name=Value, O).
+statement(subgraph(Statements), O) -->
 	{ step_indent(O, O1) },
 	keyword(subgraph), ws, "{", nl,
 	statements(Statements, O1), indent(O), "}".
-statement(subgraph(ID, Statements), O) --> !,
+statement(subgraph(ID, Statements), O) -->
 	{ step_indent(O, O1) },
 	keyword(subgraph), ws, id(ID), ws, "{", nl,
 	statements(Statements, O1), indent(O), "}".
@@ -290,12 +294,15 @@ step_indent(O, O2) :-
 	I is O.indent+2,
 	O2 = O.put(indent, I).
 
-edge((A-B)-C, O)   --> !, edge(A-B, O), " -- ", id(C).
-edge(A-(B-C), O)   --> !, node(A, O), " -- ", edge(B-C, O).
-edge(A-B, O)       --> node(A, O), " -- ", node(B, O).
-edge((A->B)->C, O) --> !, edge(A->B, O), " -> ", node(C, O).
-edge(A->(B->C), O) --> !, node(A, O), " -> ", edge(B->C, O).
-edge(A->B, O)      --> node(A, O), " -> ", node(B, O).
+edge((A-B)-C, O)   --> !, edge(A-B, O), edgeop(O), id(C).
+edge(A-(B-C), O)   --> !, node(A, O), edgeop(O), edge(B-C, O).
+edge(A-B, O)       --> node(A, O), edgeop(O), node(B, O).
+edge((A->B)->C, O) --> !, edge(A->B, O), edgeop(O), node(C, O).
+edge(A->(B->C), O) --> !, node(A, O), edgeop(O), edge(B->C, O).
+edge(A->B, O)      --> node(A, O), edgeop(O), node(B, O).
+
+edgeop(O) --> { graph == O.type }, !, " -- ".
+edgeop(_) --> " -> ".
 
 node(ID:Port:Compass, _O) --> !,
 	id(ID), ":", id(Port), ":", compass(Compass).
@@ -349,7 +356,9 @@ value(_Name, Value, List, Tail) :-
 	format(codes(List,Tail), '~w', [Value]).
 
 id(ID) --> { number(ID) }, !, number(ID).
-id(ID) --> { atom_codes(ID, Codes) }, "\"", cstring(Codes), "\"".
+id(ID) --> { atom(ID), !, atom_codes(ID, Codes) }, "\"", cstring(Codes), "\"".
+id(ID) --> { string(ID), !, string_codes(ID, Codes) }, "\"", cstring(Codes), "\"".
+id(ID) --> { format(codes(Codes), '~p', [ID]) }, "\"", cstring(Codes), "\"".
 
 keyword(Kwd) --> atom(Kwd).
 indent(Options) -->
