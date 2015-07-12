@@ -91,9 +91,27 @@ term_rendering(Data, _Vars, Options) -->
 	},
 	render_dot(DOTString, Program, Options).
 
+%%	render_dot(+DotString, +Program, +Options)// is det.
+%
+%	Render a dot program. First checks  whether dot is available. It
+%	has two modes,  produding  inline  SVG   or  producing  an  HTML
+%	<object> element, which calls the server again to fetch the SVG.
+%
+%	@tbd: Do we still need the <object> route?  How to select it?
+%	@tbd: Catch the error from Program and generate a div holding
+%	this.
+
 render_dot(_DOTString, Program, _Options) -->
 	{ \+ has_graphviz_renderer(Program) }, !,
 	no_graph_viz(Program).
+render_dot(DOTString, Program, _Options) --> !,
+	{ graphviz_stream(_{program:Program, dot:DOTString}, PID, XDotOut),
+	  call_cleanup(read_string(XDotOut, _, SVG),
+		       (    process_wait(PID, _Status),
+			    close(XDotOut)
+		       ))
+	},
+	html(\[SVG]).
 render_dot(DOTString, Program, _Options) -->
 	{ variant_sha1(DOTString, Hash),
 	  get_time(Now),
@@ -161,15 +179,7 @@ swish_send_graphviz(Request) :-
 			       ])
 			]),
 	dot_data(Hash, Data, _),
-	process_create(path(Data.program), ['-Tsvg'],
-		       [ stdin(pipe(ToDOT)),
-			 stdout(pipe(XDotOut)),
-			 process(PID)
-		       ]),
-	set_stream(ToDOT, encoding(utf8)),
-	set_stream(XDotOut, encoding(utf8)),
-	thread_create(send_to_dot(Data.dot, ToDOT), _,
-		      [ detached(true) ]),
+	graphviz_stream(Data, PID, XDotOut),
 	call_cleanup(load_structure(stream(XDotOut),
 				    SVGDom0,
 				    [ dialect(xml) ]),
@@ -181,6 +191,18 @@ swish_send_graphviz(Request) :-
 	xml_write(current_output, SVGDom,
 		  [ layout(false)
 		  ]).
+
+graphviz_stream(Data, PID, XDotOut) :-
+	process_create(path(Data.program), ['-Tsvg'],
+		       [ stdin(pipe(ToDOT)),
+			 stdout(pipe(XDotOut)),
+			 process(PID)
+		       ]),
+	set_stream(ToDOT, encoding(utf8)),
+	set_stream(XDotOut, encoding(utf8)),
+	thread_create(send_to_dot(Data.dot, ToDOT), _,
+		      [ detached(true) ]).
+
 
 rewrite_sgv_dom([element(svg, Attrs, Content)],
 		[element(svg, Attrs,
@@ -226,6 +248,14 @@ no_graph_viz(Renderer) -->
 		 ])).
 
 
+%%	add_defaults(Statements0, Statements) is det.
+
+add_defaults(Statements0, Statements) :-
+	\+ memberchk(bgcolor=_, Statements0), !,
+	Statements = [bgcolor=transparent|Statements0].
+add_defaults(Statements, Statements).
+
+
 		 /*******************************
 		 *   GENERATING A DOT PROGRAM	*
 		 *******************************/
@@ -249,9 +279,10 @@ graph_options([strict, ID], Type,
 	      gv{strict:true, id:ID, type:Type, indent:2}).
 
 graph(Statements, Options) -->
+	{ add_defaults(Statements, Statements1) },
 	strict(Options), keyword(Options.type), ws, graph_id(Options),
 	"{", nl,
-	statements(Statements, Options),
+	statements(Statements1, Options),
 	"}", nl.
 
 strict(Options) -->
