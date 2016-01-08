@@ -77,6 +77,7 @@ http:location(swish, root(.), [priority(-100)]).
 
 :- set_setting_default(http:cors, [*]).
 
+:- set_setting_default(http:prefix, '/swish').
 
 		 /*******************************
 		 *	      CONFIG		*
