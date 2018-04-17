@@ -20,7 +20,7 @@ RUN apt-add-repository ppa:swi-prolog/devel \
     #wget \
     #unzip \
 RUN npm install -g bower
-#RUN npm install -g clean-css requirejs
+RUN npm install -g clean-css-cli requirejs
 
 # Set environment variables
 ENV SHELL /bin/bash
@@ -48,10 +48,21 @@ USER $SWISH_USER
 #RUN cd $SWISH_DIR && make js
   #&& make
 
+RUN date
+
 RUN git clone -b old-version-working-for-now https://github.com/marc-hanheide/swish.git $SWISH_DIR
 # \
   #&& wget http://www.swi-prolog.org/download/swish/swish-bower-components.zip -P $HOME \
   #&& unzip -o $HOME/swish-bower-components.zip -d $SWISH_DIR
+
+WORKDIR $SWISH_DIR
+
+RUN bower install
+RUN echo ":- use_module(server).\n:- initialization server(3050)." > $SWISH_DIR/run.pl \
+#RUN cd $SWISH_DIR && bower install
+RUN cat Makefile && make -k 
+#RUN cd $SWISH_DIR && make js
+
 
 EXPOSE 3050
 
