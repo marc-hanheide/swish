@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2015-2017, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Manage the cell structure of a notebook modelled after IPython
@@ -10,15 +45,17 @@
  * @author Jan Wielemaker, J.Wielemaker@vu.nl
  */
 
-define([ "jquery", "config", "tabbed", "form", "preferences",
+define([ "jquery", "config", "tabbed", "form",
+	 "preferences", "modal", "prolog", "links",
 	 "laconic", "runner", "storage", "sha1"
        ],
-       function($, config, tabbed, form, preferences) {
+       function($, config, tabbed, form, preferences, modal, prolog, links) {
 
 var cellTypes = {
-  "program":  { label:"Program" },
-  "query":    { label:"Query" },
-  "markdown": { label:"Markdown" },
+  "program":  { label:"Program",  prefix:"p"   },
+  "query":    { label:"Query",    prefix:"q"   },
+  "markdown": { label:"Markdown", prefix:"md"  },
+  "html":     { label:"HTML",     prefix:"htm" }
 };
 
 (function($) {
@@ -31,6 +68,8 @@ var cellTypes = {
      * Initialize a Prolog Notebook.
      * @param {Object} options
      * @param {String} [options.value] provides the initial content
+     * @param {Boolean} [options.fullscreen] open notebook in fullscreen
+     * mode.
      */
     _init: function(options) {
       options = options||{};
@@ -43,17 +82,45 @@ var cellTypes = {
 	elem.addClass("notebook");
 	elem.addClass("swish-event-receiver");
 
+	function notebookMenu() {
+	  var icon = $.el.span({class:"glyphicon glyphicon-menu-hamburger"});
+	  var menu = form.widgets.dropdownButton(
+	    icon,
+	    { divClass:"notebook-menu btn-transparent",
+	      ulClass:"pull-right",
+	      client:elem,
+	      actions:
+	      { "Delete cell":     function() { this.notebook('delete'); },
+		"Copy cell":       function() { this.notebook('copy'); },
+		"Paste cell":      function() { this.notebook('paste'); },
+		"Move cell up":    function() { this.notebook('up'); },
+		"Move cell down":  function() { this.notebook('down'); },
+		"Insert cell":     function() { this.notebook('insertBelow'); },
+		"--":		   "Notebook actions",
+		"Exit fullscreen": function() { this.notebook('fullscreen',false)}
+	      }
+	    });
+
+	  return menu;
+	}
+
 	elem.append(toolbar = $.el.div(
             {class:"nb-toolbar"},
 	    glyphButton("trash", "delete", "Delete cell", "warning"),
+	    sep(),
 	    glyphButton("copy", "copy", "Copy cell", "default"),
 	    glyphButton("paste", "paste", "Paste cell below", "default"),
 	    sep(),
 	    glyphButton("chevron-up", "up", "Move cell up", "default"),
 	    glyphButton("chevron-down", "down", "Move cell down", "default"),
 	    sep(),
-	    glyphButton("plus", "insertBelow", "Insert cell below", "primary")
+	    glyphButton("plus", "insertBelow", "Insert cell below", "primary"),
+	    sep(),
+	    glyphButton("erase", "clear_all", "Clear all query output", "warning"),
+	    glyphButton("play", "run_all", "Run all queries", "primary"),
+	    glyphButton("fullscreen", "fullscreen", "Full screen", "default")
 	    ));
+	elem.append(notebookMenu());
 	elem.append($.el.div({class:"nb-view", tabIndex:"-1"},
 			     content=$.el.div({class:"nb-content"}),
 			     $.el.div({class:"nb-bottom"})));
@@ -108,6 +175,13 @@ var cellTypes = {
 	  }
 	});
 
+	/* monitor output on runners */
+	elem.on("scroll-to-bottom", function(ev, arg) {
+	  if ( arg != true ) {
+	    $(ev.target).closest(".nb-cell").nbCell('ensure_in_view', 'bottom');
+	  }
+	});
+
 	elem.data(pluginName, data);	/* store with element */
 
 					/* restore content */
@@ -127,15 +201,33 @@ var cellTypes = {
 	  copyData("title");
 	  copyData("meta");
 	  copyData("st_type");
+	  copyData("chats");
 
-	  elem.notebook('value', content.text());
+	  var docid      = elem.storage('docid', undefined, storage);
+	  var fullscreen = preferences.getDocVal(
+					   docid, 'fullscreen',
+					   config.swish.notebook.fullscreen);
+
+	  elem.notebook('value', content.text(),
+			{ fullscreen: fullscreen
+			});
 	  content.remove();
 	} else {
 	  elem.notebook('placeHolder');
 	}
 
 	elem.notebook('setupStorage', storage);
-      });
+	elem.on("data-is-clean", function(ev, clean) {
+	  if ( $(ev.target).hasClass("prolog-editor") )
+	  { elem.notebook('checkModified');
+	    ev.stopPropagation();
+	    return false;
+	  }
+	});
+	elem.on("fullscreen", function(ev, val) {
+	  preferences.setDocVal(docid, 'fullscreen', val);
+	});
+      }); /* end .each() */
     },
 
 		 /*******************************
@@ -149,6 +241,7 @@ var cellTypes = {
 	cell.nbCell('close');
 	this.notebook('updatePlaceHolder');
       }
+      this.notebook('checkModified');
       return this;
     },
 
@@ -157,6 +250,7 @@ var cellTypes = {
       if ( cell ) {
 	var dom = $.el.div({class:"notebook"});
 	$(dom).append($(cell).nbCell('saveDOM'));
+	$(dom).find(".nb-cell").removeAttr("name");
 	clipboard = stringifyNotebookDOM(dom);
       }
     },
@@ -179,24 +273,28 @@ var cellTypes = {
 	  });
 	  return this;
 	} else {
-	  alert("Not a SWISH notebook");
+	  modal.alert("Not a SWISH notebook");
 	}
       } else {
-	alert("Clipboard is empty");
+	modal.alert("Clipboard is empty");
       }
     },
 
     up: function(cell) {
       cell = cell||currentCell(this);
-      if ( cell )
+      if ( cell ) {
 	cell.insertBefore(cell.prev());
+	this.notebook('checkModified');
+      }
       return this;
     },
 
     down: function(cell) {
       cell = cell||currentCell(this);
-      if ( cell )
+      if ( cell ) {
 	cell.insertAfter(cell.next());
+	this.notebook('checkModified');
+      }
       return this;
     },
 
@@ -205,7 +303,15 @@ var cellTypes = {
     },
 
     insertBelow: function() {
-      return this.notebook('insert', { where:"below" });
+      if ( this.notebook('insert', {where:"below", if_visible:true}) == false ) {
+	modal.alert("<p>New cell would appear outside the visible area of the " +
+		    "notebook." +
+		    "<p>Please select the cell below which you want the "+
+		    "new cell to appear or scroll to the bottom of the " +
+		    "notebook.");
+      }
+
+      return this;
     },
 
     run: function(cell) {
@@ -214,11 +320,79 @@ var cellTypes = {
 	cell.nbCell("run");
     },
 
+    fullscreen: function(val) {
+      if ( val == undefined )		/* default: toggle */
+	val = !this.hasClass("fullscreen");
+
+      if ( val ) {
+	var chat_container = this.closest(".chat-container");
+	var node = chat_container.length == 1 ? chat_container : this;
+	$("body.swish").swish('fullscreen', node, this);
+      } else {
+	$("body.swish").swish('exitFullscreen');
+      }
+
+      return this;
+    },
+
     cellType: function(cell, type) {
       cell = cell||currentCell(this);
       if ( cell )
 	cell.nbCell('type', type);
     },
+
+		 /*******************************
+		 *	      SELECTION		*
+		 *******************************/
+
+    getSelection: function() {
+      return this.notebook('assignCellNames')
+                 .find(".prolog-editor")
+		 .prologEditor('getSelection');
+    },
+
+    restoreSelection: function(sel) {
+      return this.notebook('assignCellNames')
+                 .find(".prolog-editor")
+		 .prologEditor('restoreSelection', sel);
+    },
+
+
+		 /*******************************
+		 *	    CLEAN/DIRTY		*
+		 *******************************/
+
+    checkModified: function() {
+      return this.each(function() {
+	var nb = $(this);
+	var store = nb.data("storage");
+	var clean = store.cleanGeneration == nb.notebook('changeGen');
+
+	nb.notebook('markClean', clean);
+      });
+    },
+
+    /**
+     * Called if the notebook changes from clean to dirty or visa versa.
+     * This triggers `data-is-clean`, which is trapped by the tab to
+     * indicate the changed state of the editor.
+     */
+    markClean: function(clean) {
+      return this.each(function() {
+	var nb = $(this);
+	var data = nb.data(pluginName);
+
+	if ( data.clean_signalled != clean )
+	{ data.clean_signalled = clean;
+	  nb.trigger("data-is-clean", clean);
+	}
+
+	if ( clean ) {
+	  nb.find(".prolog-editor").prologEditor('setIsClean');
+	}
+      });
+    },
+
 
 		 /*******************************
 		 *	 CELL MANAGEMENT	*
@@ -259,27 +433,59 @@ var cellTypes = {
      * inserted relative to the cell with the current focus.
      * @param {jQuery} [options.restore] If provided, it must contains
      * a save/restore node that will be used to fill the new cell.
+     * @param {Bool}   [options.if_visible]  If `true`, only insert is
+     * the insertion point is visible.
      */
     insert: function(options) {
       options   = options||{};
       var relto = currentCell(this);
       var cell  = options.cell || $.el.div({class:"nb-cell"});
+      var view  = this.find(".nb-view")
+      var viewrect;
+
+      if ( options.if_visible ) {
+	if ( view.find(".nb-content > div.nb-cell").length > 0 )
+	  viewrect = view[0].getBoundingClientRect();
+      }
 
       if ( relto ) {
 	if ( options.where == 'above' ) {
+	  if ( viewrect ) {
+	    var seltop = relto[0].getBoundingClientRect().top;
+	    if ( seltop < viewrect.top )
+	      return false;
+	  }
 	  $(cell).insertBefore(relto);
 	} else {
+	  if ( viewrect ) {
+	    var selbottom = relto[0].getBoundingClientRect().bottom;
+
+	    if ( selbottom > viewrect.bottom - 20 )
+	      return false;
+	  }
 	  $(cell).insertAfter(relto);
 	}
       } else {
-	this.find(".nb-content").append(cell);
+	var content = this.find(".nb-content");
+
+	if ( viewrect ) {
+	  var cbottom = content[0].getBoundingClientRect().bottom;
+
+	  if ( cbottom > viewrect.bottom - 20 )
+	    return false;
+	}
+	content.append(cell);
       }
 
       if ( !options.cell ) {
 	$(cell).nbCell(options.restore);
       }
+      $(cell).nbCell('assignName');
       this.notebook('updatePlaceHolder');
       this.notebook('active', $(cell));
+      this.notebook('checkModified');
+
+      return this;
     },
 
 		 /*******************************
@@ -306,6 +512,9 @@ var cellTypes = {
 	  var cgen = notebook.notebook('changeGen');
 	  return gen == cgen;
 	},
+	markClean: function(clean) {
+	  notebook.notebook('markClean', clean);
+	},
 	cleanGeneration: this.notebook('changeGen'),
 	cleanData:       this.notebook('value'),
 	cleanCheckpoint: "load",
@@ -330,6 +539,9 @@ var cellTypes = {
      * @param {Object} options
      * @param {Boolean} [options.skipEmpty=false] if `true`, do not save
      *		        empty cells.
+     * @param {Boolean} [options.fullscreen] if `true', go fullscreen.
+     * Default is `true` if the toplevel `div.notebook` has a class
+     * `fullscreen`.
      * @param [String] val is an HTML string that represents
      * the notebook state.
      */
@@ -338,6 +550,8 @@ var cellTypes = {
 
       if ( val == undefined ) {
 	var dom = $.el.div({class:"notebook"});
+
+	this.notebook('assignCellNames', false);
 	this.find(".nb-cell").each(function() {
 	  cell = $(this);
 	  if ( !(options.skipEmpty && cell.nbCell('isEmpty')) )
@@ -351,15 +565,25 @@ var cellTypes = {
 	var dom = $.el.div();
 
 	content.html("");
-	$(dom).html(val);
+	dom.innerHTML = val;		/* do not execute scripts */
+
+	if ( options.fullscreen == undefined )
+	  options.fullscreen = $(dom).find("div.notebook").hasClass("fullscreen");
+	if ( options.fullscreen ) {
+	  this.removeClass("fullscreen");
+	  this.notebook('fullscreen', true);
+	}
+
 	$(dom).find(".nb-cell").each(function() {
 	  var cell = $.el.div({class:"nb-cell"});
 	  content.append(cell);
 	  $(cell).nbCell($(this));
 	});
 
-	this.find(".nb-cell.query").nbCell('onload');
+	this.find(".nb-cell").nbCell('onload');
+	this.notebook('run_all', 'onload');
 	this.notebook('updatePlaceHolder');
+	this.notebook('assignCellNames', false);
       }
     },
 
@@ -370,11 +594,25 @@ var cellTypes = {
     changeGen: function() {
       var list = [];
       this.find(".nb-cell").each(function() {
-	cell = $(this);
-	list.push(cell.nbCell('changeGen'));
+	var cg = $(this).nbCell('changeGen');
+	list.push(cg);
       });
       return sha1(list.join());
     },
+
+    /**
+     * Assign names to all cells.  This is normally done as the
+     * notebook is created, but needs to be done for old notebooks
+     * if functions are used that require named cells.  Calling this
+     * method has no effect if all cells already have a name.
+     */
+    assignCellNames: function(check) {
+      this.find(".nb-cell").nbCell('assignName');
+      if ( check != false )
+	this.notebook('checkModified');
+      return this;
+    },
+
 
 		 /*******************************
 		 *	       HELP		*
@@ -397,6 +635,55 @@ var cellTypes = {
 	       }
              });
       this.find(".nb-content").append(placeholder);
+    },
+
+    /**
+     * Run the notebook
+     */
+    run_all: function(why) {
+      var queries = [];
+
+      why = why||'all';
+
+      this.notebook('clear_all');
+
+      this.find(".nb-cell.query").each(function() {
+	if ( why == 'all' || $(this).data('run') == why )
+	  queries.push(this);
+      });
+
+      function cont(pengine) {
+	switch(pengine.state) {
+	  case 'error':
+	  case 'aborted':
+	    return false;
+	}
+
+	return true;
+      }
+
+      if ( queries.length > 0 ) {
+	queries.current = 0;
+	var complete = function(pengine) {
+	  if ( cont(pengine) &&
+	       ++queries.current < queries.length ) {
+	    $(queries[queries.current]).nbCell('run', {
+	      complete: complete
+	    })
+	  }
+	};
+
+	$(queries[0]).nbCell('run', {
+	  complete: complete
+	});
+      }
+    },
+
+    /**
+     * Erase all query output, killing possibly running queries
+     */
+    clear_all: function() {
+      this.find(".prolog-runner").prologRunner('close');
     }
   }; // methods
 
@@ -436,8 +723,17 @@ var cellTypes = {
     }
 
     var html = $($.el.div(dom)).html();
+    var nest = [];
     return html.replace(/(<div [^>]*>|<\/div>)/g, function(t) {
-      return "\n"+orderAttrs(t)+"\n";
+      var is_cell;
+      if ( t == "</div>" ) {
+	is_cell = nest.pop();
+	return is_cell ? "\n"+t+"\n" : t;
+      } else {
+	is_cell = (t.match(/(nb-cell|notebook)/) != null);
+	nest.push(is_cell);
+	return is_cell ? "\n"+orderAttrs(t)+"\n" : t;
+      }
     }).slice(1);
   }
 
@@ -503,6 +799,14 @@ var cellTypes = {
 	if ( dom instanceof jQuery ) {
 	  elem.nbCell('restoreDOM', dom);
 	} else {
+	  var close = glyphButton("remove-circle", "close", "Close",
+				  "default", "xs");
+	  elem.append(close);
+	  $(close).addClass("close-select");
+	  $(close).on("click", function() {
+	    elem.nbCell('close');
+	  });
+
 	  elem.append($.el.div({class:"nb-type-select"},
 			       $.el.label("Create a "),
 			       g=$.el.div({class:"btn-group",role:"group"}),
@@ -543,6 +847,9 @@ var cellTypes = {
 	    this.find(".editor").prologEditor('makeCurrent');
 	    break;
 	  case "query":
+	    var ed = this.prevAll(".program").first().find(".editor");
+	    if ( ed.length == 1 )
+	      ed.prologEditor('makeCurrent');
 	    this.closest(".notebook")
                 .find(".nb-cell.program")
                 .not(this.nbCell("program_cells"))
@@ -553,6 +860,7 @@ var cellTypes = {
 	this.removeClass("active");
 	switch( data.type ) {
 	  case "markdown":
+	  case "html":
 	    if ( this.hasClass("runnable") ) {
 	      this.nbCell('run');
 	    }
@@ -561,6 +869,23 @@ var cellTypes = {
       }
     },
 
+    ensure_in_view: function(where) {
+      var top  = this.position().top;
+      var view = this.closest(".nb-view");
+      var stop = view.scrollTop();
+      var vh   = view.height();
+
+      if ( top > stop &&
+	   top + this.height() < stop + vh )
+	return;
+
+      if ( where != 'top' ) {
+	top = top + this.height() - vh + 40;
+      }
+
+      this.nbCell('active', true);
+      view.scrollTop(top);
+    },
 
     type: function(type) {
       var data = this.data(pluginName);
@@ -568,20 +893,50 @@ var cellTypes = {
 	methods.type[type].apply(this);
 	data.type = type;
 	this.addClass(type);
+	this.removeAttr("name");
+	this.nbCell('assignName');
       }
       return this;
+    },
+
+    /**
+     * Give the cells in a jQuery set a unique name inside their
+     * notebook.
+     */
+    assignName: function() {
+      return this.each(function() {
+	var cell = $(this);
+
+	if ( !cell.attr("name") ) {
+	  var data   = cell.data(pluginName);
+	  if ( data.type ) {
+	    var prefix = cellTypes[data.type].prefix;
+	    var nb     = cell.closest(".notebook");
+
+	    for(i=1; ; i++) {
+	      var name = prefix+i;
+	      if ( nb.find("*[name="+name+"]").length == 0 ) {
+		cell.attr("name", name);
+		break;
+	      }
+	    }
+	  }
+	}
+      });
     },
 
     /**
      * Run the current cell
      */
     run: function() {
+      var args = arguments;
+
       return this.each(function() {
 	var cell = $(this);
 	if ( cell.hasClass("runnable") ) {
 	  var data = cell.data(pluginName);
 
-	  return methods.run[data.type].apply(cell, arguments);
+	  return methods.run[data.type].apply(cell, args);
 	} else {
 	  console.log("Cell is not runnable: ", cell);
 	}
@@ -593,11 +948,17 @@ var cellTypes = {
     },
 
     onload: function() {
-      return this.each(function() {
+      var args = arguments;
+
+      this.each(function() {
 	var cell = $(this);
-	if ( cell.data("run") == "onload" )
-	  cell.nbCell("run");
+	var data = cell.data(pluginName);
+
+	if ( methods.onload[data.type] )
+	  methods.onload[data.type].apply(cell, args);
       });
+
+      return this.nbCell('refresh');
     },
 
     close: function() {
@@ -605,11 +966,23 @@ var cellTypes = {
       return this.remove();
     },
 
+    refresh: function() {
+      if ( this.hasClass("program") ) {
+	this.find("a[data-action='background']")
+            .attr('title', this.hasClass("background") ?
+			     "Used for all queries in this notebook" :
+		             "Used for queries below this cell");
+
+      }
+      return this;
+    },
+
     getSettings: function() {
       return {
         tabled: this.data("tabled") == "true",
 	run:    this.data("run")    == "onload",
-	chunk:  parseInt(this.data("chunk")||"1")
+	chunk:  parseInt(this.data("chunk")||"1"),
+	name:   this.attr("name")
       };
     },
 
@@ -636,8 +1009,9 @@ var cellTypes = {
 		    value: current.run,
 		    title: "Run when document is loaded"
 		  }
-		]),
+		], {col:3}),
 	  form.fields.chunk(current.chunk),
+	  form.fields.name(current.name||""),
 	  form.fields.buttons(
 	  { label: "Apply",
 	    offset: 3,
@@ -660,6 +1034,14 @@ var cellTypes = {
 		else
 		  elem.removeData("chunk");
 	      }
+	      var name = values.name ? values.name.trim() : "";
+	      if (  name != current.name ) {
+		if ( name )
+		  elem.attr("name", name);
+		else
+		  elem.attr("name", null);
+	      }
+	      elem.closest(".notebook").notebook('checkModified');
 	    }
 	  })));
       }
@@ -689,20 +1071,29 @@ var cellTypes = {
     background: function() {
       this.toggleClass("background");
       this.find("a[data-action=background]").blur();
+      this.closest(".notebook").notebook('checkModified');
+      this.nbCell('refresh');
       return this;
     },
 
     /**
      * Returns all program cells in current notebook that are loaded
-     * for executing the receiving query.
+     * for executing the current cell.  This always starts with the
+     * background programs.  If `this` is a program cell, it is added.
+     * Otherwise the program cell before `this` is added.
      * @return {jQuery} set of nbCell elements that form the
      * sources for the receiving query cell.
      */
     program_cells: function() {
       var data = this.data(pluginName);
       var programs = this.closest(".notebook")
-	                 .find(".nb-cell.program.background")
-			 .add(this.prevAll(".program").first());
+	                 .find(".nb-cell.program.background");
+      if ( this.hasClass("program") ) {
+	if ( !this.hasClass("background") )
+	  programs = programs.add(this);
+      } else {
+	programs = programs.add(this.prevAll(".program").first());
+      }
       return programs;
     },
 
@@ -738,7 +1129,16 @@ var cellTypes = {
      * Compute a state fingerprint for the current cell.
      */
     changeGen: function() {
-      return methods.changeGen[this.data(pluginName).type].call(this);
+      var type = this.data(pluginName).type;
+
+      if ( type )
+	return methods.changeGen[type].call(this);
+      else
+	return 0;
+    },
+
+    text: function() {
+      return cellText(this);
     }
   }; // methods
 
@@ -748,9 +1148,39 @@ var cellTypes = {
 
   methods.type.markdown = function(options) {	/* markdown */
     var editor;
+    var cell = this;
 
     options = options||{};
     options.mode = "markdown";
+
+    function setAttr(name) {
+      if ( options[name] != undefined ) {
+	cell.attr(name, ""+options[name]);
+	delete options[name];
+      }
+    }
+    setAttr("name");
+
+    this.html("");
+    this.append(editor=$.el.div({class:"editor"}));
+    $(editor).prologEditor(options);
+    this.addClass("runnable");
+  }
+
+  methods.type.html = function(options) {	/* HTML */
+    var editor;
+    var cell = this;
+
+    options = options||{};
+    options.mode = "htmlmixed";
+
+    function setAttr(name) {
+      if ( options[name] != undefined ) {
+	cell.attr(name, ""+options[name]);
+	delete options[name];
+      }
+    }
+    setAttr("name");
 
     this.html("");
     this.append(editor=$.el.div({class:"editor"}));
@@ -759,10 +1189,15 @@ var cellTypes = {
   }
 
   methods.type.program = function(options) {	/* program */
-    var editor, bg;
+    var cell = this;
+    var editor;
 
     options = options||{};
     options.autoCurrent = false;
+    options.getSource = function() {
+      var programs = cell.nbCell('programs');
+      return programs.prologEditor('getSource', "source", true);
+    };
 
     this.html("");
 
@@ -770,8 +1205,7 @@ var cellTypes = {
       {class:"btn-group nb-cell-buttons", role:"group"},
       glyphButton("triangle-bottom", "singleline", "Show only first line",
 		  "default", "xs"),
-      bg=glyphButton("cloud", "background", "Use as background program",
-		     "success", "xs"));
+      imageButton("background", "Use as background program", "xs"));
     this.append(buttons,
 		editor=$.el.div({class:"editor with-buttons"}));
     if ( options.background )
@@ -793,15 +1227,22 @@ var cellTypes = {
     if ( options.tabled == undefined )
       options.tabled = preferences.getVal("tabled_results");
 
-    function setAttr(name) {
+    function setData(name) {
       if ( options[name] != undefined ) {
 	cell.data(name, ""+options[name]);
 	delete options[name];
       }
     }
-    setAttr("tabled");
-    setAttr("chunk");
-    setAttr("run");
+    function setAttr(name) {
+      if ( options[name] != undefined ) {
+	cell.attr(name, ""+options[name]);
+	delete options[name];
+      }
+    }
+    setData("tabled");
+    setData("chunk");
+    setData("run");
+    setAttr("name");
 
     options = $.extend({}, options,
       { role: "query",
@@ -820,8 +1261,27 @@ var cellTypes = {
       glyphButton("play", "run",       "Run query",
 		  "primary", "xs"));
 
+    function wrapSolution(a)
+    { this.find(".editor.query").prologEditor('wrapSolution', $(a).text());
+    }
+
+    var menu = form.widgets.dropdownButton(
+      $.el.span({class:"glyphicon glyphicon-menu-hamburger"}),
+      { client: cell,
+	divClass: "nb-query-menu",
+        actions: {
+	  "Aggregate (count all)": wrapSolution,
+	  "--":			   null,
+	  "Projection":		   wrapSolution,
+	  "Order by":              wrapSolution,
+	  "Distinct":              wrapSolution,
+	  "Limit":		   wrapSolution
+        }
+      });
+
     this.append(buttons,
 		$.el.div({class:"query with-buttons"},
+			 menu,
 			 $.el.span({class:"prolog-prompt"}, "?-"),
 			 editor=$.el.div({class:"editor query"})));
 
@@ -845,80 +1305,16 @@ var cellTypes = {
       cell.removeData('markdownText');
       methods.type.markdown.call(cell, {value:text});
       cell.off("dblclick", makeEditable);
-      cell.off("click", followLink);
+      cell.off("click", links.followLink);
     }
 
-    function followLink(ev) {
-      var a = $(ev.target).closest("a");
-      var done = false;
-
-      function parsePred(s) {
-	var pred = {};
-	var i;
-
-	if ( (i=s.indexOf(":")) > 0 ) {
-	  pred.module = s.substring(0,i);
-	  s = s.slice(i+1);
-	}
-	if ( (i=s.indexOf("/")) > 0 ) {
-	  pred.name = s.substring(0,i);
-	  if ( s.charAt(i+1) == '/' )	/* name//arity is a non-terminal */
-	    pred.arity = parseInt(s.slice(i+2))+2;
-	  else
-	    pred.arity = parseInt(s.slice(i+1));
-
-	  if ( !isNaN(pred.arity) )
-	    return pred;
-	}
-      }
-
-      function PlDoc(from) {
-	if ( from ) {
-	  var pred = parsePred(decodeURIComponent(from));
-
-	  if ( pred ) {
-	    $(".swish-event-receiver").trigger("pldoc", pred);
-	    ev.preventDefault();
-
-	    return true;
-	  }
-	}
-      }
-
-      if ( a.hasClass("store") ) {
-	done = true;
-	ev.preventDefault();
-	var swishStore = config.http.locations.swish + "p/";
-	var href = a.attr("href");
-	if ( href.startsWith(swishStore) ) {
-	  file = href.slice(swishStore.length);
-	  $(ev.target).parents(".swish").swish('playFile', file);
-	} else {
-	  alert("File does not appear to come from gitty store?");
-	}
-      } else if ( a.hasClass("file") ) {
-	done = true;
-	ev.preventDefault();
-        $(ev.target).parents(".swish")
-	            .swish('playURL', {url: a.attr("href")});
-      } else if ( a.hasClass("builtin") ) {
-	done = PlDoc(a.attr("href").split("predicate=").pop());
-      } else {
-	done = PlDoc(a.attr("href").split("object=").pop());
-      }
-
-      if ( !done ) {
-	ev.preventDefault();
-	window.open(a.attr("href"), '_blank');
-      }
-    }
 
     function setHTML(data) {
       cell.html(data);
       cell.removeClass("runnable");
       cell.data('markdownText', markdownText);
       cell.on("dblclick", makeEditable);
-      cell.on("click", "a", followLink);
+      cell.on("click", "a", links.followLink);
     }
 
     if ( markdownText.trim() != "" )
@@ -929,33 +1325,148 @@ var cellTypes = {
 	       success: setHTML
 	     });
     } else
-    { setHTML("");
+    { setHTML("<div class='nb-placeholder'>"+
+	      "Empty markdown cell.  Double click to edit"+
+	      "</div>");
+    }
+  };
+
+  methods.run.html = function(htmlText, options) {
+    var cell = this;
+
+    options = options||{};
+    if ( options.html == false )
+    { runScripts();
+      return;
+    }
+
+    htmlText = (htmlText||cellText(this)).trim();
+
+    function makeEditable(ev) {
+      var cell = $(ev.target).closest(".nb-cell");
+      var text = cell.data('htmlText');
+      cell.removeData('htmlText');
+      methods.type.html.call(cell, {value:text});
+      cell.off("dblclick", makeEditable);
+      cell.off("click", links.followLink);
+    }
+
+    function runScripts() {
+      if ( config.swish.notebook.eval_script == true &&
+	   options.eval_script != false ) {
+	var scripts = [];
+
+	cell.find("script").each(function() {
+	  var type = this.getAttribute('type')||"text/javascript";
+	  if ( type == "text/javascript" )
+	    scripts.push(this.textContent);
+	});
+
+	if ( scripts.length > 0 ) {
+	  var script = "(function(notebook){" + scripts.join("\n") + "})";
+	  var nb = new Notebook({
+	    cell: cell[0]
+	  });
+
+	  try {
+	    eval(script)(nb);
+	  } catch(e) {
+	    alert(e);
+	  }
+	}
+      }
+    }
+
+    function runHTML(data) {
+      cell[0].innerHTML = data;
+      runScripts();
+    }
+
+    function setHTML(data) {
+      runHTML(data);
+      cell.removeClass("runnable");
+      cell.data('htmlText', htmlText);
+      cell.on("dblclick", makeEditable);
+      cell.on("click", "a", links.followLink);
+    }
+
+    if ( htmlText != "" )
+    { setHTML(htmlText);
+    } else
+    { setHTML("<div class='nb-placeholder'>"+
+	      "Empty HTML cell.  Double click to edit"+
+	      "</div>");
     }
   };
 
   methods.run.program = function() {		/* program */
-    alert("Please define a query to run this program");
+    modal.alert("Please define a query to run this program");
   };
 
+  /**
+   * Run a query cell.
+   * @param {Object} [options]
+   * @param {Any}    [options.bindings] Initial bindings.  If this is a
+   *		     string, it is simply prepended to the query.  If
+   *		     it is an object, it is translated into a sequence
+   *		     of Prolog unifications to bind the variables.
+   * @param {Function} [options.success] Function run on success.  See
+   *		     `prologRunner._init()`.
+   * @param {Function} [options.complete] Function run on complete.  See
+   *		     `prologRunner._init()`.
+   */
   methods.run.query = function(options) {	/* query */
     var programs = this.nbCell('programs');
     var settings = this.nbCell('getSettings');
+    var text     = cellText(this);
 
     options = options||{};
-    var query = { source: programs.prologEditor('getSource'),
-                  query:  cellText(this),
-		  tabled: settings.tabled||false,
-		  chunk:  settings.chunk,
-		  title:  false
+    if ( options.bindings ) {
+      var pretext = "";
+      if ( typeof(options.bindings) === 'string' ) {
+	pretext = options.bindings;
+      } else {
+	for(var k in options.bindings) {
+	  if ( options.bindings.hasOwnProperty(k) ) {
+	    if ( pretext )
+	      pretext += ", ";
+	    pretext += k + " = " + Pengine.stringify(options.bindings[k]);
+	  }
+	}
+      }
+      if ( pretext )
+	text = pretext + ", (" + prolog.trimFullStop(text) + ")";
+    }
+    var query = { source:       programs.prologEditor('getSource',
+						      "source", true),
+                  query:        text,
+		  tabled:       settings.tabled||false,
+		  chunk:        settings.chunk,
+		  title:        false,
+		  query_editor: this.find(".prolog-editor.query")
                 };
-    if ( programs[0] )
-      query.editor = programs[0];
+    if ( programs[0]  )     query.editor   = programs[0];
+    if ( options.success  ) query.success  = options.success;
+    if ( options.complete ) query.complete = options.complete;
 
     var runner = $.el.div({class: "prolog-runner"});
     this.find(".prolog-runner").prologRunner('close');
     this.append(runner);
     $(runner).prologRunner(query);
   };
+
+		 /*******************************
+		 *	       ONLOAD		*
+		 *******************************/
+
+/* These methods are executed after all cells have been initialised */
+
+  methods.onload.html = function() {
+    return methods.run.html.call(this,
+				 undefined,	/* text */
+				 {html:false, eval_script:true});
+  };
+
 
 		 /*******************************
 		 *	SAVE/RESTORE DOM	*
@@ -965,8 +1476,36 @@ var cellTypes = {
 
   methods.saveDOM.markdown = function() {	/* markdown */
     var text = this.data('markdownText') || cellText(this);
+    var dom  = $.el.div({class:"nb-cell markdown"}, text);
 
-    return $.el.div({class:"nb-cell markdown"}, text);
+    function copyAttr(name) {
+      var value;
+      if ( (value=cell.attr(name)) && value ) {
+	$(dom).attr(name, value);
+      }
+    }
+
+    copyAttr("name");
+
+    return dom;
+  };
+
+  methods.saveDOM.html = function() {		/* HTML */
+    var text = this.data('htmlText') || cellText(this);
+    var dom  = $.el.div({class:"nb-cell html"});
+
+    // assume scripts are executed when put into the DOM
+    $(dom).html(text);
+
+    function copyAttr(name) {
+      var value;
+      if ( (value=cell.attr(name)) && value ) {
+	$(dom).attr(name, value);
+      }
+    }
+    copyAttr("name");
+
+    return dom;
   };
 
   methods.saveDOM.program = function() {	/* program */
@@ -978,9 +1517,16 @@ var cellTypes = {
 	$(dom).attr("data-"+name, true);
       }
     }
+    function copyAttr(name) {
+      var value;
+      if ( (value=cell.attr(name)) && value ) {
+	$(dom).attr(name, value);
+      }
+    }
 
     copyClassAttr("background");
     copyClassAttr("singleline");
+    copyAttr("name");
 
     return dom;
   };
@@ -994,16 +1540,23 @@ var cellTypes = {
       return false;
     }
 
-    function copyAttr(name) {
+    function copyData(name) {
       var value;
       if ( (value=cell.data(name)) && !isDefault(name,value) ) {
 	$(dom).attr("data-"+name, value);
       }
     }
+    function copyAttr(name) {
+      var value;
+      if ( (value=cell.attr(name)) && value ) {
+	$(dom).attr(name, value);
+      }
+    }
 
-    copyAttr("tabled");
-    copyAttr("chunk");
-    copyAttr("run");
+    copyData("tabled");
+    copyData("chunk");
+    copyData("run");
+    copyAttr("name");
 
     return dom;
   };
@@ -1011,12 +1564,38 @@ var cellTypes = {
 /* ---------------- restoreDOM ---------------- */
 
   methods.restoreDOM.markdown = function(dom) {	/* markdown */
+    var cell = this;
     var text = dom.text().trim();
-    this.data('markdownText', text);
+
+    cell.data('markdownText', text);
+
+    function copyAttr(name) {
+      var value;
+      if ( (value=dom.attr(name)) && value ) {
+	cell.attr(name, value);
+      }
+    }
+    copyAttr("name");
+
     methods.run.markdown.call(this, text);
   };
 
+  methods.restoreDOM.html = function(dom) {	/* HTML */
+    var cell = this;
+
+    function copyAttr(name) {
+      var value;
+      if ( (value=dom.attr(name)) && value ) {
+	cell.attr(name, value);
+      }
+    }
+    copyAttr("name");
+
+    methods.run.html.call(this, dom.html(), {eval_script:false});
+  };
+
   methods.restoreDOM.program = function(dom) {	/* program */
+    var cell = this;
     var opts = { value:dom.text().trim() };
 
     function getAttr(name) {
@@ -1025,9 +1604,16 @@ var cellTypes = {
 	opts[name] = value;
       }
     }
+    function copyAttr(name) {
+      var value;
+      if ( (value=dom.attr(name)) && value ) {
+	cell.attr(name, value);
+      }
+    }
 
     getAttr("background");
     getAttr("singleline");
+    copyAttr("name");
 
     methods.type.program.call(this, opts);
   };
@@ -1035,7 +1621,7 @@ var cellTypes = {
   methods.restoreDOM.query = function(dom) {	/* query */
     var opts = { value:dom.text().trim() };
 
-    function getAttr(name) {
+    function getData(name) {
       var value;
       if ( (value=dom.data(name)) ) {
 	if ( name == "chunk" )
@@ -1044,10 +1630,17 @@ var cellTypes = {
 	  opts[name] = value;
       }
     }
+    function getAttr(name) {
+      var value;
+      if ( (value=dom.attr(name)) ) {
+	opts[name] = value;
+      }
+    }
 
-    getAttr("tabled");
-    getAttr("chunk");
-    getAttr("run");
+    getData("tabled");
+    getData("chunk");
+    getData("run");
+    getAttr("name");
     if ( opts.tabled == undefined )
       opts.tabled = false;
 
@@ -1059,11 +1652,17 @@ var cellTypes = {
   methods.changeGen.markdown = function() {	/* markdown */
     var text = this.data('markdownText') || cellText(this);
 
-    return sha1(text);
+    return sha1("M"+text.trim());
+  };
+
+  methods.changeGen.html = function() {	/* HTML */
+    var text = this.data('htmlText') || cellText(this);
+
+    return sha1("H"+text.trim());
   };
 
   methods.changeGen.program = function() {	/* program */
-    var text = "";
+    var text = "P";
     var cell = this;
 
     function addClassAttr(name, key) {
@@ -1074,25 +1673,32 @@ var cellTypes = {
     addClassAttr("background", "B");
     addClassAttr("singleline", "S");
 
-    text += "V"+cellText(this);
+    text += "V"+cellText(this).trim();
     return sha1(text);
   };
 
   methods.changeGen.query = function() {	/* query */
-    var text = "";
+    var text = "Q";
     var cell = this;
 
-    function addAttr(name, key) {
+    function addData(name, key) {
       var value;
 
       if ( (value=cell.data(name)) )
 	text += key+value;
     }
+    function addAttr(name, key) {
+      var value;
 
-    addAttr("tabled", "T");
-    addAttr("chunk", "C");
-    addAttr("run", "R");
-    text += "V"+cellText(this);
+      if ( (value=cell.attr(name)) )
+	text += key+value;
+    }
+
+    addData("tabled", "T");
+    addData("chunk", "C");
+    addData("run", "R");
+    addAttr("name", "N");
+    text += "V"+cellText(this).trim();
 
     return sha1(text);
   };
@@ -1101,6 +1707,12 @@ var cellTypes = {
 
   methods.isEmpty.markdown = function() {	/* markdown */
     var text = this.data('markdownText') || cellText(this);
+
+    return text.trim() == "";
+  };
+
+  methods.isEmpty.html = function() {	/* HTML */
+    var text = this.data('htmlText') || cellText(this);
 
     return text.trim() == "";
   };
@@ -1118,7 +1730,7 @@ var cellTypes = {
 		 *******************************/
 
   function cellText(cell) {
-    return cell.find(".editor").prologEditor('getSource');
+    return cell.find(".editor").prologEditor('getSource', undefined, true);
   }
 
   /**
@@ -1200,9 +1812,20 @@ var cellTypes = {
 
 function glyphButton(glyph, action, title, style, size) {
   size = size||"sm";
-  var btn = $.el.a({href:"#", class:"btn btn-"+style+" btn-"+size,
+  var btn = $.el.a({href:"#",
+		    class:"btn btn-"+style+" btn-"+size+" action-"+action,
 		    title:title, "data-action":action},
 		   $.el.span({class:"glyphicon glyphicon-"+glyph}));
+
+  return btn;
+}
+
+function imageButton(action, title, size) {
+  size = size||"sm";
+  var btn = $.el.a({href:"#",
+		    class:"btn btn-default btn-image btn-"+size+" action-"+action,
+		    title:title, "data-action":action},
+		   $.el.span({class:"image-icon"}));
 
   return btn;
 }
@@ -1216,6 +1839,85 @@ function glyphButtonGlyph(elem, action, glyph) {
 }
 
 function sep() {
-  return $.el.span({class:"thin-space"}, " ");
+  return $.el.span({class:"menu-space"}, " ");
+}
+
+		 /*******************************
+		 *	 NOTEBOOK ClASS		*
+		 *******************************/
+
+function Notebook(options) {
+  this.my_cell = options.cell;
+}
+
+/**
+ * Create a Pengine from default arguments
+ */
+Notebook.prototype.swish = function(options) {
+  var pcells = this.cell().nbCell("programs");
+  var source = pcells.prologEditor('getSource', "source", true);
+
+  if ( source )
+    options.src = source;
+
+  return $.swish(options);
+}
+
+/**
+ * @param {String} [name] Return (query) cell with given name.  If
+ * name is omitted, return the current cell.
+ * @return {jQuery} Notebook cells
+ */
+Notebook.prototype.cell = function(name) {
+  if ( name )
+    return this.notebook().find('.nb-cell[name="'+name+'"]');
+  else
+    return $(this.my_cell);
+};
+
+/**
+ * @returns {jQuery} the notebook as a whole.
+ */
+Notebook.prototype.notebook = function() {
+  return $(this.my_cell).closest(".notebook");
+};
+
+/**
+ * Run named query cell with bindings
+ * @param {String} cell Name of the cell to run
+ * @param {Object|String} [bindings] Bindings to pass to the query.
+ */
+Notebook.prototype.run = function(cell, bindings) {
+  var options = {};
+  if ( bindings )
+    options.bindings = bindings;
+
+  this.cell(cell).nbCell('run', options);
+};
+
+/**
+ * Submit a form, calling a predicate
+ * @param {String} formsel is the selector to find the form in the
+ * notebook cell.
+ * @param {Object} options
+ * @param {String} options.predicate predicate to call.  The predicate
+ * receives one argument, containing the form data as a dict.
+ * @param {Function} options.onsuccess is the function run on successful
+ * completion
+ */
+Notebook.prototype.submit = function(formsel, options) {
+  var formel = this.$(formsel);
+  var data   = form.serializeAsObject(formel);
+
+  form.formError(formel, null);
+  this.swish({
+    ask: options.predicate+"(("+Pengine.stringify(data)+"))",
+    onerror: function(data) { form.formError(formel, data); },
+    onsuccess: options.onsuccess
+  });
+};
+
+Notebook.prototype.$ = function(selector) {
+  return this.cell().find(selector);
 }
 });

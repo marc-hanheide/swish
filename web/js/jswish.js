@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2017, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Combine the SWISH components.
@@ -12,7 +47,7 @@ define([ "jquery",
 	 "preferences",
 	 "history",
 	 "modal",
-	 "jquery-ui",
+	 "chat",
 	 "splitter",
 	 "bootstrap",
 	 "pane",
@@ -25,6 +60,8 @@ define([ "jquery",
 	 "runner",
 	 "term",
 	 "laconic",
+	 "login",
+	 "chatroom",
 	 "d3",
 	 "c3",
 	 "svg-pan-zoom"
@@ -32,37 +69,58 @@ define([ "jquery",
 
 preferences.setDefault("semantic-highlighting", true);
 preferences.setDefault("emacs-keybinding", false);
+preferences.setDefault("new-tab", true);
+preferences.setDefault("preserve-state", true);
+preferences.setInform("preserve-state", ".unloadable");
 
 (function($) {
   var pluginName = 'swish';
 
+  function glyph(name, func) {
+    func.glyph = name;
+    return func;
+  }
+
+  function icon(name, func) {
+    func.typeIcon = name;
+    return func;
+  }
+
   var defaults = {
     menu: {
       "File":
-      { "Save ...": function() {
+      { "Save ...": glyph("cloud-upload", function() {
 	  menuBroadcast("save", "as");
-	},
-	"Info & history ...": function() {
+	}),
+	"Info & history ...": glyph("info-sign", function() {
 	  menuBroadcast("fileInfo");
-	},
+	}),
+	"Reload": glyph("refresh", function() {
+	  menuBroadcast("reload");
+	}),
 	"Open recent": {
 	  type: "submenu",
+	  glyph: "paperclip",
 	  action: function(ev) {
 	    history.openRecent(ev, $(this).data('document'));
 	  },
 	  update: history.updateRecentUL
 	},
 	"Share": "--",
-	"Download": function() {
-	  menuBroadcast("download");
-	},
-	"Collaborate ...": function() {
+	"Follow ...": config.http.locations.follow_file_options ?
+		      glyph("eye-open", function() {
+	  menuBroadcast("follow-file");
+	}) : undefined,
+	"Start TogetherJS ...": icon("togetherjs", function() {
 	  $("body").swish('collaborate');
-	},
-	"Print group": "--",
-	"Print ...": function() {
-	  $(".prolog-editor").prologEditor('print');
-	}
+	}),
+	"Export": "--",
+	"Download": glyph("floppy-save", function() {
+	  menuBroadcast("download");
+	}),
+	"Print ...": glyph("print", function() {
+	  menuBroadcast("print");
+	})
       },
       "Edit":
       { "Clear messages": function() {
@@ -72,8 +130,15 @@ preferences.setDefault("emacs-keybinding", false);
 	"View changes": function() {
 	  menuBroadcast("diff");
 	},
-	"Revert changes": function() {
-	  menuBroadcast("revert");
+	"Edit": "--",
+	"Find (Ctrl-F)": function() {
+	  menuBroadcast("edit-command", "find");
+	},
+	"Find and replace (Shift-Ctrl-F)": function() {
+	  menuBroadcast("edit-command", "replace");
+	},
+	"Jump to line (Alt-G)": function() {
+	  menuBroadcast("edit-command", "jumpToLine");
 	},
 	"Options": "--",
 	"Semantic highlighting": {
@@ -84,38 +149,23 @@ preferences.setDefault("emacs-keybinding", false);
 	  preference: "emacs-keybinding",
 	  type: "checkbox",
 	  value: "false"
+	},
+	"Open document in new tab": {
+	  preference: "new-tab",
+	  type: "checkbox",
+	  value: "true"
+	},
+	"Preserve state in browser": {
+	  preference: "preserve-state",
+	  type: "checkbox",
+	  value: "true"
 	}
       },
       "Examples": function(navbar, dropdown) {
 	$("body").swish('populateExamples', navbar, dropdown);
       },
-      "Help":
-      { "About ...": function() {
-	  menuBroadcast("help", {file:"about.html"});
-	},
-	"Topics": "--",
-	"Help ...": function() {
-	  menuBroadcast("help", {file:"help.html"});
-	},
-	"Runner ...": function() {
-	  menuBroadcast("help", {file:"runner.html"});
-	},
-	"Debugging ...": function() {
-	  menuBroadcast("help", {file:"debug.html"});
-	},
-	"Notebook ...": function() {
-	  menuBroadcast("help", {file:"notebook.html"});
-	},
-	"Background": "--",
-	"Limitations ...": function() {
-	  menuBroadcast("help", {file:"beware.html"});
-	},
-	"Caveats ...": function() {
-	  menuBroadcast("help", {file:"caveats.html"});
-	},
-	"Background ...": function() {
-	  menuBroadcast("help", {file:"background.html"});
-	},
+      "Help": function(navbar, dropdown) {
+	$("body").swish('populateHelp', navbar, dropdown);
       }
     }
   }; // defaults;
@@ -137,6 +187,7 @@ preferences.setDefault("emacs-keybinding", false);
       setupModal();
       setupPanes();
       setupResize();
+      setupUnload();
       $("#search").search();
 
       options = options||{};
@@ -147,6 +198,7 @@ preferences.setDefault("emacs-keybinding", false);
 	var data = {};			/* private data */
 
 	$("#navbar").navbar(defaults.menu);
+	$("#login").login();
 
 	var  editor = $(".prolog-editor").prologEditor({save:true});
 	data.runner = $(".prolog-runners").prologRunners();
@@ -159,17 +211,59 @@ preferences.setDefault("emacs-keybinding", false);
 	    },
 	    examples: elem.swish('examples'),
 	    runner:   data.runner,
+	    editor:   editor[0]
 	  });
-
-	editor.prologEditor('makeCurrent');
 
 	$(".notebook").notebook();
 
-	if ( options.show_beware )
+	if ( options.show_beware &&
+	     !(swish.option && swish.option.show_beware == false) )
 	  menuBroadcast("help", {file:"beware.html", notagain:"beware"});
 
 	elem.data(pluginName, data);	/* store with element */
+
+	if ( window.location.href.indexOf("&togetherjs=") > 0 )
+	  elem.swish('collaborate');
+
+	$("#chat").chat('');
+	$("#broadcast-bell")
+		.chatbell({
+		  empty_title: "Click to open chat"
+		});
+	$("#chat-menu").on("click", "a", function(ev) {
+	  var a = $(ev.target).closest("a");
+	  switch ( a.data('action') ) {
+	  case 'chat-shared':
+	    $("body").swish('playFile', {
+	      file: config.swish.hangout,
+	      chat: 'large'
+	    });
+	    break;
+	  case 'chat-about-file':
+	    menuBroadcast("chat-about-file");
+	  }
+	});
+
+	setInterval(function(){
+	  $(".each-minute").trigger("minute");
+	}, 60000);
+
+	if ( elem[pluginName]('preserve_state') )
+	  $(".unloadable").trigger("restore");
       });
+    },
+
+    /**
+     * @return {Boolean} `true` when we should save and restore
+     * the state to the browser local store.
+     */
+    preserve_state: function() {
+      if ( swish.option.preserve_state == false )
+	return false;
+      if ( preferences.getVal("preserve-state") == false )
+	return false;
+
+      return true;
     },
 
     /**
@@ -208,6 +302,7 @@ preferences.setDefault("emacs-keybinding", false);
      * be used to highlight the Prolog port at the indicated location.
      */
     playFile: function(options) {
+      var elem = this;
       if ( typeof(options) == "string" )
 	options = {file:options};
 
@@ -221,7 +316,7 @@ preferences.setDefault("emacs-keybinding", false);
 	       data: {format: "json"},
 	       success: function(reply) {
 		 reply.url = url;
-		 reply.type = "gitty";
+		 reply.st_type = "gitty";
 
 		 function copyAttrs(names) {
 		   for(var i=0; i<names.length; i++) {
@@ -234,10 +329,10 @@ preferences.setDefault("emacs-keybinding", false);
 		 copyAttrs([ "line",
 			     "regex", "showAllMatches",
 			     "newTab", "noHistory",
-			     "prompt"
+			     "prompt", "chat"
 			   ]);
 
-		 menuBroadcast("source", reply);
+		 elem.swish('setSource', reply);
 	       },
 	       error: function(jqXHR) {
 		 modal.ajaxError(jqXHR);
@@ -257,6 +352,7 @@ preferences.setDefault("emacs-keybinding", false);
      * @param {Regex}   [options.search] Text searched for.
      */
     playURL: function(options) {
+      var elem = this;
       var existing = this.find(".storage").storage('match', options);
 
       if ( existing && existing.storage('expose', "Already open") )
@@ -296,13 +392,31 @@ preferences.setDefault("emacs-keybinding", false);
 			     "prompt"
 			   ]);
 
-		 menuBroadcast("source", msg);
+		 elem.swish('setSource', msg);
 	       },
 	       error: function(jqXHR) {
 		 modal.ajaxError(jqXHR);
 	       }
       });
     },
+
+    /**
+     * Open a source.  If we are in fullscreen mode and the current
+     * object cannot be opened by the current fullscreen node, we
+     * leave fullscreen mode.  Called by playFile and playURL.
+     */
+    setSource: function(src) {
+      var st = this.swish('isFullscreen');
+
+      if ( !(st && st.storage('setSource', src)) ) {
+	if ( st )
+	  this.swish('exitFullscreen');
+	this.find(".tabbed").tabbed('tabFromSource', src);
+      }
+
+      return this;
+    },
+
 
     /**
      * @param {Object} ex
@@ -364,10 +478,57 @@ preferences.setDefault("emacs-keybinding", false);
 		   $("#navbar").navbar('extendDropdown', dropdown,
 				       title, options);
 		 }
+	       },
+	       error: function(jqXHR) {
+		 modal.ajaxError(jqXHR);
 	       }
 	     });
       return this;
     },
+
+    /**
+     * Populate the help dropdown of the navigation bar. This
+     * method is used by the navigation bar initialization.
+     * @param {Object} navbar is the navigation bar
+     * @param {Object} dropdown is the examples dropdown
+     */
+    populateHelp: function(navbar, dropdown) {
+      var that = this;
+
+      function openHelpFunction(help) {
+	return function() {
+	  menuBroadcast("help", {file:help.file});
+	};
+      }
+
+      $.ajax(config.http.locations.swish_help_index,
+	     { dataType: "json",
+	       success: function(data) {
+		 for(var i=0; i<data.length; i++) {
+		   var help = data[i];
+		   var title;
+		   var options;
+
+		   if ( help == "--" || help.type == "divider" ) {
+		     title = "--";
+		     options = "--";
+		   } else {
+		     var name = help.file;
+		     title = help.title;
+		     options = openHelpFunction(help);
+		   }
+
+		   $("#navbar").navbar('extendDropdown', dropdown,
+				       title, options);
+		 }
+	       },
+	       error: function(jqXHR) {
+		 modal.ajaxError(jqXHR);
+	       }
+	     });
+      return this;
+    },
+
 
     /**
      * pick up all Prolog sources, preparing to execute a query. Currently
@@ -435,6 +596,77 @@ preferences.setDefault("emacs-keybinding", false);
     },
 
     /**
+     * Make DOM element fullscreen
+     * @param {jQuery} node is the element to turn into fullscreen.
+     * Currently this only works for a notebook.
+     * @patam {jQuery} main is the node getting the `fullscreen
+     * hamburger` class.
+     */
+    fullscreen: function(node, main) {
+      var content = this.find(".container.tile-top");
+
+      if ( !content.hasClass("fullscreen") ) {
+	var data = this.data("fullscreen");
+	if ( !data ) {
+	  data = {};
+	  this.data("fullscreen", data);
+	}
+	content.addClass("fullscreen");
+	main = main||node;
+	main.addClass("fullscreen hamburger");
+	data.fullscreen_origin = node.parent()[0];
+	data.fullscreen_main = main[0];
+	$(content.children()[0]).hide();
+	content.append(node);
+	main.trigger('fullscreen', true);
+      }
+
+      return this;
+    },
+
+    /**
+     * If some element is in fullscreen mode, revert
+     * back to tabbed mode.
+     * @return {Boolean} `true` if successful.
+     */
+    exitFullscreen: function() {
+      var content = this.find(".container.tile-top");
+
+      if ( content.hasClass("fullscreen") ) {
+	var data = this.data("fullscreen");
+	var node = $(content.children()[1]);
+	var main = data.fullscreen_main;
+
+	content.removeClass("fullscreen");
+	$(data.fullscreen_main).removeClass("fullscreen hamburger");
+	$(data.fullscreen_origin).append(node);
+	data.fullscreen_origin = null;
+	data.fullscreen_main = null;
+	$(content.children()[0]).show();
+	$(main).trigger('fullscreen', false);
+
+	return true;
+      }
+
+      return false;
+    },
+
+    /**
+     * Detect fullscreen mode
+     * @return {jQuery} storage object that is running in fullscreen
+     * mode.
+     */
+    isFullscreen: function() {
+      var content = this.find(".container.tile-top");
+
+      if ( content.hasClass("fullscreen") ) {
+	var st = content.find(".storage");
+	if ( st.length != 0 )
+	  return st;
+      }
+    },
+
+    /**
      * Open TogetherJS after lazy loading.
      */
     collaborate: function() {
@@ -489,15 +721,26 @@ preferences.setDefault("emacs-keybinding", false);
   function setupPanes() {
     $(".tile").tile();
     $(window).resize(function() { $(".tile").tile('resize'); });
-    $('body').on("click", "button.close-pane", function() {
-      closePane($(this).parent());
-    });
     $(".tabbed").tabbed();
   }
 
   function setupResize() {
     $(window).resize(function() {
       $(".reactive-size").trigger('reactive-resize');
+    });
+  }
+
+  function setupUnload() {
+    $(window).bind("beforeunload", function(ev) {
+      var rc;
+
+      $(".unloadable").each(function() {
+	var r = {};
+	$(this).trigger("unload", r);
+	rc = rc||r.rc;
+      });
+
+      return rc;
     });
   }
 

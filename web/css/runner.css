@@ -10,7 +10,8 @@ div.prolog-runners {
 
 div.prolog-runner {
   position: relative;
-  margin: 2px 0px 2px;		/* top,left/right,bottom */
+  padding: 2px 0px 2px;		/* top,left/right,bottom */
+  margin: 0px;
   border: 1px solid #ccc;
   border-radius: 5px;
 }
@@ -19,11 +20,34 @@ div.prolog-runner.tabled {
   border: 0px;
 }
 
-div.prolog-runner > a.close {
+div.prolog-runner > div.runner-title.runner-button-group {
+  color: #fff;
+  background: #000;
+  display: none;
+  border: 2px solid #fff;
   position: absolute;
-  top: -4px;
-  right: -10px;
+  top: -1px;
+  right: -1px;
   z-index: 10;
+  box-shadow: -6px 6px 5px #888888;
+}
+
+div.prolog-runner.tabled > div.runner-title.runner-button-group {
+  top: 2px;
+}
+
+div.prolog-runner:hover > div.runner-title.runner-button-group {
+  display: block;
+}
+
+div.runner-title.runner-button-group > button {
+  color: #fff;
+  opacity: 0.8;
+  text-shadow: 0 1px 0 #000;
+}
+
+div.runner-title.runner-button-group > button:hover {
+  opacity: 1;
 }
 
 div.prolog-runner:focus {
@@ -33,13 +57,13 @@ div.prolog-runner:focus {
 div.prolog-runner.iconic > div.runner-results { display: none; }
 
 div.runner-title {
-  padding: 0px 5px 2px;
-  border-width: 2px;
+  padding: 0px 5px 0px;
+  border: 2px solid #333;
   border-radius: 5px;
   box-sizing: border-box;
 }
 
-div.prolog-runner:focus div.runner-title {
+div.prolog-runner:focus div.panel-heading {
   border: 2px solid #000;
 }
 
@@ -92,19 +116,6 @@ div.runners-menu {
   z-index: 2000;
 }
 
-div.runners-menu button.dropdown-toggle {
-  background: none repeat scroll 0 0 transparent;
-  border: 0 none;
-  cursor: pointer;
-  padding: 0;
-  color: #000;
-  float: right;
-  font-size: 16px;
-  font-weight: bold;
-  line-height: 1;
-  opacity: 0.2;
-}
-
 div.runner-title button.dropdown-toggle {
   background: none repeat scroll 0 0 transparent;
   border: 0 none;
@@ -116,7 +127,7 @@ div.runner-title > button {
   background: none repeat scroll 0 0 transparent;
   border: 0 none;
   cursor: pointer;
-  padding: 0;
+  padding: 3px 0px;
   color: #000;
   float: right;
   font-size: 21px;
@@ -127,7 +138,10 @@ div.runner-title > button {
   margin-left: 5px;
 }
 
-div.runners-menu button.dropdown-toggle:hover,
+div.runner-title > button.rtb-toggleIconic
+{ padding: 6px 0px 0px 0px;
+}
+
 div.runner-title > button:hover {
   opacity: 0.8;
 }
@@ -143,14 +157,16 @@ span.runner-state.false      { background-image: url("../icons/dead.png");    }
 span.runner-state.error,
 span.runner-state.aborted    { background-image: url("../icons/error.png");   }
 
-div.controller.running    > div.running    { display:block; }
-div.controller.wait-next  > div.wait-next  { display:block; }
-div.controller.wait-input > div.wait-input { display:block; }
-div.controller > div                       { display:none;  }
+div.controller.running    > span.running    { display:inline; }
+div.controller.running    > span.sparklines { display:inline; }
+div.controller.wait-next  > span.sparklines { display:inline; }
+div.controller.wait-next  > span.wait-next  { display:inline; }
+div.controller.wait-input > span.wait-input { display:inline; }
+div.controller > span                       { display:none;  }
 
-div.wait-input button { float: right; box-sizing: border-box; }
-div.wait-input span   { display: block; overflow: hidden; }
-div.wait-input input  { width: 100%; box-sizing: border-box; }
+span.wait-input button { float: right; box-sizing: border-box; }
+span.wait-input span   { display: block; overflow: hidden; }
+span.wait-input input  { width: 100%; box-sizing: border-box; }
 
 /* print-message output */
 
@@ -158,6 +174,28 @@ pre.prolog-message {
   white-space: pre-wrap;
   padding: 2px 2px;
   margin: 0;
+  width: 100%;
+}
+
+span.output.error-context {
+  display: block;
+  position: relative;
+  padding-left: 25px;
+}
+
+span.output.error-context:hover {
+  text-decoration: underline;
+}
+
+span.output.error-context > span.glyphicon {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+}
+
+a.goto-error:hover {
+  text-decoration: none;		/* ignored inside <pre>? */
+  outline: 2px solid #337ab7;
 }
 
 pre.msg-information   { color: #060; font-style: italic; }
@@ -187,7 +225,7 @@ td.answer-nth { color: #060; font-size: 80%; font-style: italic;
 /* The debugger */
 
 div.trace-buttons button > span { display: none; }
-div.trace-buttons button
+div.trace-buttons button, div.RIP
 { display: inline-block;
   width: 24px;
   height: 24px;
@@ -203,6 +241,9 @@ button.skip     { background-image: url("../icons/stepOver.png"); }
 button.up       { background-image: url("../icons/stepOut.png"); }
 button.retry    { background-image: url("../icons/retry.png"); }
 button.abort    { background-image: url("../icons/abort.png"); }
+
+div.RIP	{ background-image: url("../icons/rip.png");   }
+
 
 span.depth
 { display: inline-block;
@@ -230,4 +271,12 @@ div.prolog-exception
 { color: #f00;
   font-size: 80%;
   margin-left: 5em;
+}
+
+div.controller.running > span.sparklines { margin-left: 0.5em; }
+
+.jqstooltip {
+  -webkit-box-sizing: content-box;
+  -moz-box-sizing: content-box;
+  box-sizing: content-box;
 }

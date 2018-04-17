@@ -1,5 +1,6 @@
 @import url("../bower_components/codemirror/lib/codemirror.css");
 @import url("../bower_components/codemirror/addon/hint/show-hint.css");
+@import url("../bower_components/codemirror/addon/dialog/dialog.css");
 @import url("../js/codemirror/theme/prolog.css");
 @import url("../js/codemirror/addon/hover/prolog-hover.css");
 @import url("../js/codemirror/addon/hint/templates-hint.css");
@@ -15,24 +16,34 @@
 }
 
 .CodeMirror .source-msg {
+  position: relative;
   border-left: 2px solid #000;
   padding: 0px 5px;
   background-color: #ddd;
   cursor: hand; cursor: pointer;
 }
 
-.CodeMirror .source-msg > span {
-  color: #888;
-  font-weight: bold;
-  border: 1px solid #bbb;
+.CodeMirror .source-msg > span.glyphicon {
+  color: #000;
+  position: absolute;
+  right: 5px;
+  top: 5px;
 }
 
-.CodeMirror .source-msg:hover > span {
-  color: #f00;
+.CodeMirror .source-msg-charmark {
+  height: 1.5ex;
+}
+
+.CodeMirror .source-msg:hover {
+  text-decoration: line-through;
 }
 
 .CodeMirror-hover {
   outline:1px solid grey;
+}
+
+.CodeMirror-target-line {
+  background-color: yellow;
 }
 
 .CodeMirror-search-match {
@@ -59,4 +70,48 @@
   padding-left: 4px;
   font-size: 120%;
   position: relative; top: -0.2em;
+}
+
+		 /*******************************
+		 *	       JUMP		*
+		 *******************************/
+
+div.edit-modal
+{ position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2000;
+}
+
+
+div.edit-modal > div.mask
+{ position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: #000;
+  opacity: 0.2;
+}
+
+div.edit-modal .goto-source
+{ position: absolute;
+  padding: 0.2em 0.5em 0em;
+  border-radius: 5px;
+  border: 1px solid #000;
+  background: #fff;
+  box-shadow: 10px 10px 5px #888888;
+  z-index: 2001;
+}
+
+		 /*******************************
+		 *	      DIALOG		*
+		 *******************************/
+
+div.CodeMirror-dialog
+{ border: 1px solid #888;
+  background: #f8f8f8;
+  box-shadow: 10px 10px 5px #888888;
 }

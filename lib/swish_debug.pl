@@ -1,38 +1,44 @@
-/*  Part of SWI-Prolog
+/*  Part of SWISH
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@cs.vu.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2015, VU University Amsterdam
+    Copyright (c)  2015-2017, VU University Amsterdam
+    All rights reserved.
 
-    This program is free software; you can redistribute it and/or
-    modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 2
-    of the License, or (at your option) any later version.
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
 
-    You should have received a copy of the GNU General Public
-    License along with this library; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
 
-    As a special exception, if you link this library with other files,
-    compiled with a Free Software compiler, to produce an executable, this
-    library does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however
-    invalidate any other reasons why the executable file might be covered by
-    the GNU General Public License.
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
 */
 
 :- module(swish_debug,
-	  [ pengine_stale_module/1,	% -Module, -State
+	  [ pengine_stale_module/1,	% -Module
 	    pengine_stale_module/2,	% -Module, -State
 	    swish_statistics/1,		% -Statistics
 	    start_swish_stat_collector/0,
-	    swish_stats/2		% ?Period, ?Dicts
+	    swish_stats/2,		% ?Period, ?Dicts
+	    swish_died_thread/2		% ?Thread, ?State
 	  ]).
 :- use_module(library(pengines)).
 :- use_module(library(broadcast)).
@@ -75,20 +81,35 @@ stale_module_property(M, pengine, Pengine) :-
 	pengine_property(Pengine, module(M)).
 stale_module_property(M, pengine_queue, Queue) :-
 	pengine_property(Pengine, module(M)),
-	pengines:pengine_queue(Pengine, Queue, _TimeOut, _Time).
+	member(G, pengines:pengine_queue(Pengine, Queue, _TimeOut, _Time)),
+	call(G).		% fool ClioPatria cpack xref
 stale_module_property(M, pengine_pending_queue, Queue) :-
 	pengine_property(Pengine, module(M)),
-	pengines:output_queue(Pengine, Queue, _Time).
+	member(G, [pengines:output_queue(Pengine, Queue, _Time)]),
+	call(G).		% fool ClioPatria cpack xref
 stale_module_property(M, thread, Thread) :-
 	pengine_property(Pengine, module(M)),
-	pengine_property(Pengine, thread(Thread)).
+	member(G, [pengines:pengine_property(Pengine, thread(Thread))]),
+	call(G).		% fool ClioPatria cpack xref
 stale_module_property(M, thread_status, Status) :-
 	pengine_property(Pengine, module(M)),
 	pengine_property(Pengine, thread(Thread)),
 	catch(thread_property(Thread, status(Status)), _, fail).
+stale_module_property(M, module_class, Class) :-
+	module_property(M, class(Class)).
 stale_module_property(M, program_space, Space) :-
 	module_property(M, program_space(Space)).
+stale_module_property(M, program_size, Size) :-
+	module_property(M, program_size(Size)).
+stale_module_property(M, predicates, List) :-
+	current_module(M),
+	findall(PI, pi_in_module(M, PI), List).
+stale_module_property(UUID, highlight_state, State) :-
+	current_highlight_state(UUID, State).
 
+pi_in_module(M, Name/Arity) :-
+	'$c_current_predicate'(_, M:Head),
+	functor(Head, Name, Arity).
 
 %%	swish_statistics(?State)
 %
@@ -97,7 +118,9 @@ stale_module_property(M, program_space, Space) :-
 swish_statistics(highlight_states(Count)) :-
 	aggregate_all(count, current_highlight_state(_,_), Count).
 swish_statistics(pengines(Count)) :-
-	aggregate_all(count, pengine_property(_,self(_)), Count).
+	aggregate_all(count, pengine_property(_,thread(_)), Count).
+swish_statistics(remote_pengines(Count)) :-
+	aggregate_all(count, pengine_property(_,remote(_)), Count).
 swish_statistics(pengines_created(Count)) :-
 	(   flag(pengines_created, Old, Old)
 	->  Count = Old
@@ -133,8 +156,13 @@ uuid_code(_, X) :- char_type(X, xdigit(_)).
 		 *	     STATISTICS		*
 		 *******************************/
 
+:- if(current_predicate(http_unix_daemon:http_daemon/0)).
+:- use_module(library(broadcast)).
+:- listen(http(post_server_start), start_swish_stat_collector).
+:- else.
 :- initialization
 	start_swish_stat_collector.
+:- endif.
 
 %%	start_swish_stat_collector
 %
@@ -194,15 +222,24 @@ stats_ring(year,   5).
 
 swish_stats(Name, Ring, Stats) :-
 	thread_self(Me),
-	thread_send_message(Name, Me-get_stats(Ring)),
+	catch(thread_send_message(Name, Me-get_stats(Ring)), E,
+	      stats_died(Name, E)),
 	thread_get_message(get_stats(Ring, Stats)).
+
+stats_died(Alias, E) :-
+	print_message(error, E),
+	thread_join(Alias, Status),
+	print_message(error, swish_stats(died, Status)),
+	start_swish_stat_collector,
+	fail.
 
 stat_collect(Dims, Interval) :-
 	new_sliding_stats(Dims, SlidingStat),
 	get_time(Now),
-	stat_loop(SlidingStat, _{}, Now, Interval).
+	ITime is floor(Now),
+	stat_loop(SlidingStat, _{}, ITime, Interval, [true]).
 
-stat_loop(SlidingStat, Stat0, StatTime, Interval) :-
+stat_loop(SlidingStat, Stat0, StatTime, Interval, Wrap) :-
 	(   thread_self(Me),
 	    thread_get_message(Me, Request,
 			       [ deadline(StatTime)
@@ -211,12 +248,12 @@ stat_loop(SlidingStat, Stat0, StatTime, Interval) :-
 	    ->	true
 	    ;	debug(swish_stats, 'Failed to process ~p', [Request])
 	    ),
-	    stat_loop(SlidingStat, Stat0, StatTime, Interval)
-	;   swish_stats(Stat1),
+	    stat_loop(SlidingStat, Stat0, StatTime, Interval, Wrap)
+	;   get_stats(Wrap, Stat1),
 	    dif_stat(Stat1, Stat0, Stat),
-	    push_sliding_stats(SlidingStat, Stat),
+	    push_sliding_stats(SlidingStat, Stat, Wrap1),
 	    NextTime is StatTime+Interval,
-	    stat_loop(SlidingStat, Stat1, NextTime, Interval)
+	    stat_loop(SlidingStat, Stat1, NextTime, Interval, Wrap1)
 	).
 
 dif_stat(Stat1, Stat0, Stat) :-
@@ -237,36 +274,51 @@ reply_stats_request(Client-get_stats(Period), SlidingStat) :-
 	ring_values(Ring, Values),
 	thread_send_message(Client, get_stats(Period, Values)).
 
-%%	swish_stats(-Stats:dict) is det.
+%%	get_stats(+Wrap, -Stats:dict) is det.
 %
 %	Request elementary statistics.
 
-swish_stats(stats{ cpu:CPU,
-		   rss:RSS,
-		   fordblks:Fordblks,
-		   stack:Stack,
-		   pengines:Pengines,
-		   pengines_created:PenginesCreated,
-		   time:Time
-		 }) :-
+get_stats(Wrap, Stats) :-
+	Stats0 = stats{ cpu:CPU,
+			rss:RSS,
+			stack:Stack,
+			pengines:Pengines,
+			threads:Threads,
+			pengines_created:PenginesCreated,
+			time:Time
+		      },
 	get_time(Now),
 	Time is floor(Now),
 	statistics(process_cputime, PCPU),
 	statistics(cputime, MyCPU),
 	CPU is PCPU-MyCPU,
 	statistics(stack, Stack),
-	fordblks(Fordblks),
+	statistics(threads, Threads),
 	catch(procps_stat(Stat), _,
 	      Stat = stat{rss:0}),
 	RSS = Stat.rss,
 	swish_statistics(pengines(Pengines)),
-	swish_statistics(pengines_created(PenginesCreated)).
+	swish_statistics(pengines_created(PenginesCreated)),
+	add_fordblks(Wrap, Stats0, Stats1),
+	add_visitors(Stats1, Stats).
 
 :- if(current_predicate(mallinfo/1)).
-fordblks(Fordblks) :-
-	mallinfo(MallInfo),
-	Fordblks = MallInfo.fordblks.
+add_fordblks(Wrap, Stats0, Stats) :-
+	(   Wrap = [true|_]
+	->  member(G, [mallinfo(MallInfo)]),
+	    call(G),			% fool ClioPatria xref
+	    FordBlks = MallInfo.get(fordblks),
+	    b_setval(fordblks, FordBlks)
+	;   nb_current(fordblks, FordBlks)
+	), !,
+	Stats = Stats0.put(fordblks, FordBlks).
 :- endif.
+add_fordblks(_, Stats, Stats).
+
+add_visitors(Stats0, Stats) :-
+	broadcast_request(swish(visitor_count(C))), !,
+	Stats = Stats0.put(visitors, C).
+add_visitors(Stats, Stats).
 
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -278,20 +330,20 @@ new_sliding_stats(Dims, Stats) :-
 	maplist(new_ring, Dims, Rings),
 	compound_name_arguments(Stats, sliding_stats, Rings).
 
-push_sliding_stats(Stats, Values) :-
-	push_sliding_stats(1, Stats, Values).
+push_sliding_stats(Stats, Values, Wrap) :-
+	push_sliding_stats(1, Stats, Values, Wrap).
 
-push_sliding_stats(I, Stats, Values) :-
+push_sliding_stats(I, Stats, Values, [Wrap|WrapT]) :-
 	arg(I, Stats, Ring),
 	push_ring(Ring, Values, Wrap),
 	(   Wrap == true
 	->  average_ring(Ring, Avg),
 	    I2 is I+1,
-	    (	push_sliding_stats(I2, Stats, Avg)
+	    (	push_sliding_stats(I2, Stats, Avg, WrapT)
 	    ->	true
 	    ;	true
 	    )
-	;   true
+	;   WrapT = []
 	).
 
 new_ring(Dim, ring(0, Ring)) :-
@@ -342,6 +394,24 @@ avg_key(Dicts, Len, Key, Key-Avg) :-
 	Avg is Sum/Len.
 
 
+%!	swish_died_thread(TID, Status) is nondet.
+%
+%	True if Id is a thread that died   with Status and has not (yet)
+%	been joined. Note that such threads may exist for a short while.
+
+swish_died_thread(TID, Status) :-
+	findall(TID-Stat, (thread_property(Thread, status(Stat)),
+			   Stat \== running,
+			   thread_property(Thread, id(TID))), Pairs),
+	member(TID-Stat, Pairs),
+	status_message(Stat, Status).
+
+status_message(exception(Ex), Message) :- !,
+	message_to_string(Ex, Message0),
+	string_concat('ERROR: ', Message0, Message).
+status_message(Status, Status).
+
+
 		 /*******************************
 		 *	     SANDBOX		*
 		 *******************************/
@@ -353,3 +423,4 @@ sandbox:safe_primitive(swish_debug:pengine_stale_module(_)).
 sandbox:safe_primitive(swish_debug:pengine_stale_module(_,_)).
 sandbox:safe_primitive(swish_debug:swish_statistics(_)).
 sandbox:safe_primitive(swish_debug:swish_stats(_, _)).
+sandbox:safe_primitive(swish_debug:swish_died_thread(_, _)).

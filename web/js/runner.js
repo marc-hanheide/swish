@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2017, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Run an manage Prolog queries and their output
@@ -10,9 +45,11 @@
  */
 
 define([ "jquery", "config", "preferences",
-	 "cm/lib/codemirror", "form", "answer", "laconic"
+	 "cm/lib/codemirror", "form", "prolog", "links", "modal",
+	 "answer", "laconic", "sparkline", "download", "search"
        ],
-       function($, config, preferences, CodeMirror, form) {
+       function($, config, preferences,
+		CodeMirror, form, prolog, links, modal) {
 
 		 /*******************************
 		 *	  THE COLLECTION	*
@@ -34,11 +71,10 @@ define([ "jquery", "config", "preferences",
 	var data = {};
 
 	function runnerMenu() {
-	  var icon = $.el.span();
-	  $(icon).html("&#9776");
-	  var menu = dropdownButton(
+	  var icon = $.el.span({class:"glyphicon glyphicon-menu-hamburger"});
+	  var menu = form.widgets.dropdownButton(
 	    icon,
-	    { divClass:"runners-menu",
+	    { divClass:"runners-menu btn-transparent",
 	      ulClass:"pull-right",
 	      client:elem,
 	      actions:
@@ -68,6 +104,9 @@ define([ "jquery", "config", "preferences",
 	elem.on("pane.resize", function() {
 	  elem.prologRunners('scrollToBottom', true);
 	});
+	elem.on("scroll-to-bottom", function(ev, arg) {
+	  elem.prologRunners('scrollToBottom', arg);
+	});
 
 	elem.data(pluginName, data);
       });
@@ -95,7 +134,7 @@ define([ "jquery", "config", "preferences",
 
       data.inner.append(runner);
       $(runner).prologRunner(query);
-      this.prologRunners('scrollToBottom');
+      this.trigger('scroll-to-bottom');
 
       return this;
     },
@@ -209,36 +248,32 @@ define([ "jquery", "config", "preferences",
      * results as a table.
      * @param {Boolean} [query.title=true] If `false`, suppress the
      * title.
+     * @param {Function} [query.success] Called when the query completed
+     * with success (`true`).  `this` is the runner, the first argument
+     * is the Pengine.
+     * @param {Function} [query.complete] Called when the query
+     * completed, regardless of the result. Passes the same arguments as
+     * `query.success`. The `state` property of the Pengine contains the
+     * result state.  See `this.setState()`.
      */
     _init: function(query) {
       return this.each(function() {
 	var elem = $(this);
 	var data = {};
 
-	function closeButton() {
-	  var btn = $.el.button({title:"Close query"});
-	  $(btn).html('&times');
-
-	  $(btn).on("click", function() { elem.prologRunner('close'); });
-	  return btn;
-	}
-
-	function iconizeButton() {
-	  var btn = $.el.button({title:"Iconify query"}, "_");
-	  $(btn).on("click", function() { elem.prologRunner('toggleIconic'); });
-	  return btn;
-	}
-
-	function csvButton() {
-	  var btn = $.el.button({title:"Download CSV"}, "\u21ca");
-	  $(btn).on("click", function() { elem.prologRunner('downloadCSV'); });
+	function titleBarButton(glyph, title, action, display) {
+	  var btn = $.el.button({title:title, class:"rtb-"+action},
+				$.el.span({class:"glyphicon glyphicon-"+glyph}));
+	  $(btn).on("click", function() { elem.prologRunner(action); });
+	  if ( display == false )
+	    $(btn).hide();
 	  return btn;
 	}
 
 	function stateButton() {
 	  var icon = $.el.span({class:"runner-state show-state idle"});
 
-	  return dropdownButton(icon);
+	  return form.widgets.dropdownButton(icon);
 	}
 
 	function controllerDiv() {
@@ -276,47 +311,56 @@ define([ "jquery", "config", "preferences",
 	    return {input:inp, button:btn};
 	  }
 
+	  function statusChart() {
+	    var spark = $.el.span({class:"sparklines"}, "");
+
+	    return spark;
+	  }
+
 	  var inp = input();
 	  var div = $.el.div({class:"controller show-state"},
-			     $.el.div({class:"running"},
-				      button(abort, "Abort")),
-			     $.el.div({class:"wait-next"},
-				      button(next, "Next"),
-				      button(next10, "10"),
-				      button(next100, "100"),
-				      button(next1000, "1,000"), " ",
-				      button(stop, "Stop")),
-			     $.el.div({class:"wait-input"},
-				      button(abort, "Abort"), inp.button,
-				      $.el.span(inp.input)));
+			     $.el.span({class:"running"},
+				       button(abort, "Abort")),
+			     $.el.span({class:"wait-next"},
+				       button(next, "Next"),
+				       button(next10, "10"),
+				       button(next100, "100"),
+				       button(next1000, "1,000"), " ",
+				       button(stop, "Stop")),
+			     $.el.span({class:"wait-input"},
+				       button(abort, "Abort"), inp.button,
+				       $.el.span(inp.input)),
+			     statusChart());
 
 	  return div;
 	}
 
-	elem.addClass("prolog-runner");
+	elem.addClass("prolog-runner panel panel-default");
 	if ( query.tabled )
 	  elem.addClass("tabled");
 	if ( query.title != false ) {
 	  var qspan = $.el.span({class:"query cm-s-prolog"});
 	  CodeMirror.runMode(query.query, "prolog", qspan);
 	  elem.append($.el.div(
-	    {class:"runner-title ui-widget-header"},
-	    closeButton(),
-	    iconizeButton(),
-	    csvButton(),
+	    {class:"runner-title panel-heading"},
+	    titleBarButton("remove-circle", "Close",        'close'),
+	    titleBarButton("minus",         "Iconify",      'toggleIconic'),
+	    titleBarButton("download",      "Download CSV", 'downloadCSV'),
+	    titleBarButton("link",          "Permalink",    'permalink', false),
 	    stateButton(),
-	    qspan));
+	    qspan,
+            $.el.br({clear:"all"})));
 	} else {
-	  var close = glyphButton("remove-circle", "Close");
-	  elem.append(close);
-	  $(close).on("click", function() {
-	    elem.prologRunner('close');
-	  });
+	  elem.append($.el.div(
+	    {class:"runner-title runner-button-group"},
+	    titleBarButton("remove-circle", "Close",        'close'),
+	    titleBarButton("minus",         "Iconify",      'toggleIconic'),
+	    titleBarButton("download",      "Download CSV", 'downloadCSV'),
+	    titleBarButton("link",          "Permalink",    'permalink', false)));
 	}
 	if ( query.chunk )
 	  data.chunk = query.chunk;
-	elem.append($.el.div(
-	  {class:"runner-results"}));
+	elem.append($.el.div({class:"runner-results panel-body"}));
 	elem.append(controllerDiv());
 
 	elem.data('prologRunner', data);
@@ -331,6 +375,7 @@ define([ "jquery", "config", "preferences",
 	    }
 	  }
 	});
+	elem.on("click", "a", links.followLink);
 
 	data.savedFocus = document.activeElement;
 	elem.attr('tabindex', -1);
@@ -338,6 +383,8 @@ define([ "jquery", "config", "preferences",
 
 	data.query   = query;
 	data.answers = 0;
+
+	elem.prologRunner('setScreenDimensions');
 
 	/* Load pengines.js incrementally because we wish to ask the
 	   one from the pengine server rather than a packaged one.
@@ -359,14 +406,46 @@ define([ "jquery", "config", "preferences",
 	    onstop: handleStop,
 	    onprompt: handlePrompt,
 	    onoutput: handleOutput,
+	    onping: handlePing,
 	    onerror: handleError,
 	    onabort: handleAbort});
 	  data.prolog.state = "idle";
+	  if ( config.swish.ping && data.prolog.ping != undefined ) {
+	    data.prolog.ping(config.swish.ping*1000);
+	  }
 	});
 
 	return this;
       });
     }, //_init()
+
+    setScreenDimensions: function() {
+      var data = this.data(pluginName);
+      var pre  = $.el.pre({class: "measure"}, "xxxxxxxxxx");
+      var sw   = this.width();
+      var sh;
+      var container;
+
+      container = this.closest(".prolog-runners");
+      if ( container.length == 0 )
+	container = this.closest(".nb-view");
+      if ( container.length )
+	sh = container.height();
+
+      this.append(pre);
+      var cw = $(pre).width()/10;
+      var ch = $(pre).height();
+      $(pre).remove();
+
+      data.screen = {
+        width: sw,
+	cols: Math.floor(sw/cw)
+      };
+      if ( sh !== undefined ) {
+	data.screen.height = sh;
+	data.screen.rows   = Math.floor(sh/ch);
+      }
+    },
 
     /**
      * Add a _positive_ answer to the runner.  The answer is embedded in
@@ -379,6 +458,45 @@ define([ "jquery", "config", "preferences",
     renderAnswer: function(answer) {
       var data = this.data('prologRunner');
       var even = (++data.answers % 2 == 0);
+      var obj = removeSpecialBindings(answer);
+
+      function removeSpecialBindings(answer) {
+	var obj = {};
+	var bindings = answer.variables;
+	var projection = answer.projection;
+	var prefix = "_swish__";
+
+	for (var i = 0; i < bindings.length; i++) {
+	  var vars = bindings[i].variables;
+
+	  for (var v = 0; v < vars.length; v++) {
+	    if ( vars[v].startsWith(prefix) ) {
+	      var name = vars[v].replace(prefix, "");
+	      obj[name] = bindings[i].value;
+	      bindings.splice(i, 1);
+	      i--;
+	    }
+	  }
+	}
+
+	if ( projection ) {
+	  for(var i = 0; i < projection.length; i++) {
+	    if ( projection[i].startsWith(prefix) ) {
+	      projection.splice(i, 1);
+	      i--;
+	    }
+	  }
+	}
+
+	return obj;
+      }
+
+      // Would be better to avoid wrapping in HTML, but that
+      // requires extending pengines_io.pl
+      if ( obj.permahash ) {
+	data.permahash = $(obj.permahash).text().replace(/'/g,"");
+	this.find(".rtb-permalink").show({duration:400});
+      }
 
       if ( data.query.tabled ) {
 	if ( data.answers == 1 ) {
@@ -408,21 +526,83 @@ define([ "jquery", "config", "preferences",
 
     /**
      * Add pengine output as `<span class="output">`
-     * @param {String} data HTML that is inserted in the span.
+     * @param {String} data HTML that is inserted into the span.
+     * @return {DOM} the added node (a span)
      */
     outputHTML: function(data) {
       var span = $.el.span({class:"output"});
-      $(span).html(data);
       addAnswer(this, span);
+      span.innerHTML = data;
+      runScripts(span);
+      return span;
     },
+
+    /**
+     * Handle object output
+     */
+     downloadButton: function(obj) {
+       var button = $.el.a({class:"download"});
+       addAnswer(this, button);
+       $(button).downloader(obj);
+     },
+
+    /**
+     * Display a syntax error in the query.
+     * {Object} options
+     * {String} options.message is the message
+     * {Object} options.location contains the `line` and `ch` position
+     */
+     syntaxError: function(options) {
+       var data = this.data(pluginName);
+
+       options.data = "<pre class=\"output msg-error\">" +
+		      options.message +
+		      "</pre>";
+       options.location.file = true;
+       $(data.query.query_editor).prologEditor('highlightError', options);
+       return this;
+     },
 
     /**
      * Add an error message to the output.  The error is
      * wrapped in a `<pre class="error">` element.
-     * @param {String} msg the plain-text error message
+     * @param {String|Object} options If `options` is a string, it is a
+     * plain-text error message.  Otherwise it is the Pengine error
+     * object.
+     * @param {String} options.message is the plain error message
+     * @param {String} options.code is the error code
      */
-    error: function(msg) {
+    error: function(options) {
+      var msg;
+
+      if ( typeof(options) == 'object' ) {
+	if ( options.code == "died" ) {
+	  addAnswer(this, $.el.div({
+	    class:"RIP",
+	    title:"Remote pengine timed out"
+	  }));
+	  return this;
+	} else if ( options.code == "syntax_error" )
+	{ var m = options.message.match(/^HTTP:DATA:(\d+):(\d+):\s*(.*)/);
+
+	  if ( m && m.length == 4 ) {
+	    this.prologRunner('syntaxError',
+			      { location:
+				{ line: parseInt(m[1])-1,
+				  ch:	parseInt(m[2])
+				},
+				message: m[3]
+			      });
+	    msg = "Cannot run query due to a syntax error (check query window)";
+	  }
+	}
+	if ( !msg )
+	  msg = options.message;
+      } else
+	msg = options;
+
       addAnswer(this, $.el.pre({class:"prolog-message msg-error"}, msg));
+      return this;
     },
 
     /**
@@ -524,6 +704,43 @@ define([ "jquery", "config", "preferences",
     },
 
     /**
+     * Handle a (dashboard) form.  This opens dialog from the supplied
+     * `html`.
+     * @param {Object} prompt
+     * @param {String} prompt.html contains the HTML content of the form
+     */
+    form: function(prompt) {
+      var data = this.data('prologRunner');
+
+      modal.show({
+	title: "Please enter parameters",
+	body: function() {
+	  this.html(prompt.data.html);
+	  this.find("[data-search-in]").search({search:false});
+
+	  this.on("click", "button[data-action]", function(ev) {
+	    var button = $(ev.target).closest("button");
+	    var action = button.data('action');
+
+	    if ( action == 'run' ) {
+	      var formel = $(ev.target).closest("form");
+	      var fdata  = form.serializeAsObject(formel, true);
+	      var s      = Pengine.stringify(fdata);
+	      data.prolog.respond(s);
+	    } else if ( action == 'cancel' ) {
+	      data.prolog.respond("cancel");
+	    }
+	    button.closest(".modal").modal('hide');
+
+	    ev.preventDefault();
+	    return false;
+	  });
+	}
+      });
+    },
+
+
+    /**
      * send a response (to pengine onprompt handler) to the
      * pengine and add the response to the dialogue as
      * `div class="response">`
@@ -593,7 +810,7 @@ define([ "jquery", "config", "preferences",
     },
 
     /**
-     * Abort the associated Prolog engines.
+     * Abort the associated Prolog engine.
      */
     abort: function() {
       return this.each(function() {
@@ -609,7 +826,7 @@ define([ "jquery", "config", "preferences",
      */
     close: function() {
       if ( this.length ) {
-	var runners = RS(this);
+	var parents = this.parent();
 
 	this.each(function() {
 	  var elem = $(this);
@@ -617,12 +834,13 @@ define([ "jquery", "config", "preferences",
 
 	  if ( elem.prologRunner('alive') ) {
 	    $(".prolog-editor").trigger('pengine-died', data.prolog.id);
-	    data.prolog.destroy();
+	    data.prolog.abort();
+	    elem.prologRunner('setState', 'aborted');
 	  }
 	});
 	this.remove();
 
-	runners.prologRunners('scrollToBottom', true);
+	parents.trigger('scroll-to-bottom', true);
       }
       return this;
     },
@@ -648,7 +866,7 @@ define([ "jquery", "config", "preferences",
 	this.removeClass("iconic");
       }
 
-      RS(this).prologRunners('scrollToBottom', true);
+      this.trigger('scroll-to-bottom', true);
 
       return this;
     },
@@ -663,102 +881,107 @@ define([ "jquery", "config", "preferences",
       actions = $.extend({ "Re-run": function() { console.log("Re-Run ", this); }
 			 }, actions);
 
-      populateMenu(menu, this, actions);
+      form.widgets.populateMenu(menu, this, actions);
 
       return this;
     },
 
     /**
      * Download query results as CSV.
-     * @param {Object} [options]
-     * @param {String} [options.projection] holds the Prolog projection
-     * variables, separated by commas, e.g., `"X,Y"`
-     * @param {String} [options.format="prolog"] holds a string that
-     * defines the variation of the CSV format, e.g., `"prolog"` or
-     * `"rdf"`
-     * @param {String|Number} [options.limit] defines the max number of
-     * results.
-     * @param {Boolean} [options.distinct] requests only distinct
-     * results.
      */
     downloadCSV: function(options) {
-      var elem = this;
       var data = this.data('prologRunner');
-      var vars = [];
+      var query = termNoFullStop(data.query.query);
 
-      options = options||{};
+      prolog.downloadCSV(query, data.query.source, options);
 
-      if ( options.projection ) {
-	var formel;
-	var format = options.format||"prolog";
-	var query = data.query.query.replace(/\.\s*$/,"");
+      return this;
+    },
 
-	function attr(name,value) {
-	  return $.el.input({type:"hidden", name:name, value:value});
+    /**
+     * Save a permalink
+     */
+    permalink: function() {
+      var runner = this;
+      var data = this.data('prologRunner');
+
+      if ( data.permahash ) {
+	var href = config.http.locations.permalink + data.permahash;
+	href = location.protocol + "//" + location.host + href;
+	var profile = $("#login").login('get_profile',
+					[ "display_name", "avatar", "email",
+					  "identity"
+					]);
+	var author  = profile.display_name;
+
+	function savePermalink() {
+	  this.append($.el.form(
+            { class:"form-horizontal"},
+	      form.fields.hidden("identity", profile.identity),
+	      profile.identity ? undefined :
+			       form.fields.hidden("avatar", profile.avatar),
+	      form.fields.link(href),
+	      form.fields.fileName(null, false),
+	      form.fields.title(),
+	      form.fields.description(),
+	      form.fields.tags([]),
+	      form.fields.author(author, profile.identity),
+	      form.fields.buttons(
+	      { label: "Save permalink",
+		action: function(ev, as) {
+			  runner.prologRunner('save_permalink', as);
+			  return false;
+			}
+	      })));
 	}
 
-	if ( options.distinct )
-	  query = "distinct(["+options.projection+"],("+query+"))";
-	if ( options.limit ) {
-	  var limit = parseInt(options.limit.replace(/[ _]/g,""));
-
-	  if ( typeof(limit) == "number" ) {
-	    query = "limit("+limit+",("+query+"))";
-	  } else {
-	    alert("Not an integer: ", options.limit);
-	    return false;
-	  }
-	}
-
-	formel = $.el.form({ method:"POST",
-                             action:config.http.locations.pengines+"/create",
-			     target:"_blank"
-		           },
-			   attr("format", "csv"),
-			   attr("chunk", "100000000"),
-			   attr("application", "swish"),
-			   attr("ask", query),
-			   attr("src_text", data.query.source),
-			   attr("template", format+"("+options.projection+")"));
-	$("body").append(formel);
-	formel.submit();
-	$(formel).remove();
+	form.showDialog({
+	  title: "Save permalink",
+	  body:	 savePermalink
+	});
       } else {
-	this.find("span.query span.cm-var").each(function() {
-	  var name = $(this).text();
-	  if ( vars.indexOf(name) < 0 )
-	    vars.push(name);
-        });
-
-
-	function infoBody() {
-	  var formel = $.el.form(
-            {class:"form-horizontal"},
-	    form.fields.projection(vars.join(",")),
-	    form.fields.csvFormat(config.swish.csv_formats,
-				  preferences.getVal("csvFormat")),
-	    form.fields.limit("10 000", false),
-	    form.fields.buttons(
-	      { label: "Download CSV",
-		action: function(ev, params) {
-		  ev.preventDefault();
-		  if ( config.swish.csv_formats.length > 1 )
-		    preferences.setVal("csvFormat", params.format);
-		  elem.prologRunner('downloadCSV', params);
-
-		  return false;
-		}
-	      }));
-	  this.append(formel);
-	}
-
-	form.showDialog({ title: "Download query results as CSV",
-			  body:  infoBody
-		        });
+	modal.alert("No permahash");
       }
 
       return this;
-      },
+    },
+
+    save_permalink: function(as) {
+      var runner = this;
+      var data = this.data('prologRunner');
+      var post = {
+        data: data.permahash,
+	type: "lnk",
+	meta: as
+      };
+
+      delete post.meta.link;
+
+      $.ajax({ url: config.http.locations.web_storage,
+               dataType: "json",
+	       contentType: "application/json",
+	       type: "POST",
+	       data: JSON.stringify(post),
+	       success: function(reply) {
+		 if ( reply.error ) {
+		   modal.alert(errorString("Could not save", reply));
+		 } else {
+		   modal.feedback({ html: "Saved",
+				    owner: runner
+		                  });
+		 }
+	       },
+	       error: function(jqXHR, textStatus, errorThrown) {
+		 if ( jqXHR.status == 403 ) {
+		   modal.alert("Permission denied.  Please try a different name");
+		 } else {
+		   alert('Save failed: '+textStatus);
+		 }
+	       }
+             });
+
+      return this;
+    },
 
   /**
    * @param {String} state defines the new state of the pengine.
@@ -788,6 +1011,7 @@ define([ "jquery", "config", "preferences",
 
      if ( data.prolog.state != state ) {
        var stateful = this.find(".show-state");
+       var query = data.query;
 
        stateful.removeClass(data.prolog.state).addClass(state);
        data.prolog.state = state;
@@ -797,17 +1021,26 @@ define([ "jquery", "config", "preferences",
        } else if ( state == "wait-input" ) {
 	 this.find("input").focus();
        }
-       if ( !aliveState(state) ) {
-	 $(".prolog-editor").trigger('pengine-died', data.prolog.id);
-	 data.prolog.destroy();
-       }
+
+       if ( state == "true" && query.success )
+	 query.success.call(this, data.prolog);
+       if ( !aliveState(state) && query.complete )
+	 query.complete.call(this, data.prolog);
      }
-     if ( state == "wait-next" || state == "true" ) {
-       var runners = RS(this);
-       setTimeout(function() { runners.prologRunners('scrollToBottom') }, 100);
+
+     var runners = RS(this);
+     if ( !aliveState(state) ) {
+       var elem = this;
+       $(".prolog-editor").trigger('pengine-died', data.prolog.id);
+       data.prolog.destroy();
+       setTimeout(function() { elem.trigger('scroll-to-bottom') }, 100);
+     } else if ( state == "wait-next" || state == "true" ) {
+       var elem = this;
+       setTimeout(function() { elem.trigger('scroll-to-bottom') }, 100);
      } else {
-       RS(this).prologRunners('scrollToBottom');
+       this.trigger('scroll-to-bottom');
      }
+
      return this;
    },
 
@@ -828,6 +1061,63 @@ define([ "jquery", "config", "preferences",
     */
    alive: function() {
      return aliveState(this.prologRunner('getState'));
+   },
+
+   /**
+    * Handle ping data, updating the sparkline status
+    */
+   ping: function(stats) {
+     var data = this.data('prologRunner');
+
+     if ( data && data.prolog && data.prolog.state == "running" ) {
+       var spark = this.find(".sparklines");
+       var stacks = ["global", "local", "trail"];
+       var colors = ["red", "blue", "green"];
+       var names  = ["Global ", "Local ", "Trail "];
+       var maxlength = 10;
+
+       if ( !data.stacks )
+	 data.stacks = { global:{usage:[]}, local:{usage:[]}, trail:{usage:[]} };
+
+       for(i=0; i<stacks.length; i++) {
+	 var s = stacks[i];
+	 var limit = stats.stacks[s].limit;
+	 var usage = stats.stacks[s].usage;
+
+	 var u = Math.log10((usage/limit)*10000);
+	 function toBytes(limit, n) {
+	   var bytes = Math.round((Math.pow(10, n)/10000)*limit);
+
+	   function numberWithCommas(x) {
+	     x = x.toString();
+	     var pattern = /(-?\d+)(\d{3})/;
+	     while (pattern.test(x))
+	       x = x.replace(pattern, "$1,$2");
+	     return x;
+	   }
+
+	   return numberWithCommas(bytes);
+	 }
+
+	 data.stacks[s].limit = limit;
+	 if ( data.stacks[s].usage.length >= maxlength )
+	   data.stacks[s].usage = data.stacks[s].usage.slice(1);
+	 data.stacks[s].usage.push(u);
+	 spark.sparkline(data.stacks[s].usage,
+			 { height: "2em",
+			   composite: i>0,
+			   chartRangeMin: 0,
+			   chartRangeMax: 4,
+			   lineColor: colors[i],
+			   tooltipPrefix: names[i],
+			   tooltipSuffix: " bytes",
+			   tooltipChartTitle: i == 0 ? "Stack usage" : undefined,
+			   numberFormatter: function(n) {
+			     return toBytes(limit, n);
+			   }
+			 });
+       }
+     }
    }
 
   }; // methods
@@ -838,7 +1128,7 @@ define([ "jquery", "config", "preferences",
 		 *******************************/
 
   function RS(from) {			/* find runners from parts */
-    return $(from).parents(".prolog-runners");
+    return $(from).closest(".prolog-runners");
   }
 
   function addAnswer(runner, html) {
@@ -872,6 +1162,52 @@ define([ "jquery", "config", "preferences",
     return table;
   }
 
+		 /*******************************
+		 *	 SCRIPTS IN NODES	*
+		 *******************************/
+
+  var node_id = 1;
+  function runScripts(elem) {
+    var scripts = [];
+    elem = $(elem);
+
+    elem.find("script").each(function() {
+      var type = this.getAttribute('type')||"text/javascript";
+      if ( type == "text/javascript" )
+	scripts.push(this.textContent);
+    });
+
+    if ( scripts.length > 0 ) {
+      var script = "(function(node){" + scripts.join("\n") + "})";
+      var node = new Node({
+        node: elem[0]
+      });
+
+      try {
+	eval(script)(node);
+      } catch(e) {
+	alert(e);
+      }
+    }
+  }
+
+  function Node(options) {
+    this.my_node = options.node;
+  }
+
+  Node.prototype.node = function() {
+    return $(this.my_node);
+  }
+
+  /**
+   * Provide a unique id for the node.  This can be used as prefix to
+   * avoid conflicts for `id` attributes.
+   */
+  Node.prototype.unique_id = function() {
+    if ( !this.uid )
+      this.uid = node_id++;
+    return this.uid;
+  }
 
 
 		 /*******************************
@@ -884,43 +1220,65 @@ define([ "jquery", "config", "preferences",
     return $(runner).parents(".swish").swish('breakpoints', data.prolog.id);
   }
 
+  function registerSources(pengine) {
+    var runner = pengine.options.runner;
+    var data   = runner.data(pluginName);
+
+    if ( data.query.editor )
+      $(data.query.editor).prologEditor('pengine', {add: pengine.id});
+  }
+
   function handleCreate() {
     var elem = this.pengine.options.runner;
     var data = elem.data(pluginName);
-    var options = {};
-    var bps;
+    if ( data == undefined ) {
+      this.pengine.destroy();			/* element already gone */
+    } else
+    { var options = $.extend({}, data.screen);
+      var bps;
+      var resvar = config.swish.residuals_var || "Residuals";
+      var hashvar = config.swish.permahash_var;
 
-    if ( data.query.editor )
-      $(data.query.editor).prologEditor('pengine', {add: this.pengine.id});
+      if ( hashvar )
+	hashvar = ", "+hashvar;
+      else
+	hashvar = "";
 
-    if ( (bps = breakpoints(elem)) )
-      options.breakpoints = Pengine.stringify(bps);
-    if ( data.chunk )
-      options.chunk = data.chunk;
+      registerSources(this.pengine);
 
-    this.pengine.ask("'$swish wrapper'((" +
-		     termNoFullStop(data.query.query) +
-		     "), Residuals)", options);
-    elem.prologRunner('setState', "running");
+      if ( (bps = breakpoints(elem)) )
+	options.breakpoints = Pengine.stringify(bps);
+      if ( data.chunk )
+	options.chunk = data.chunk;
+
+      this.pengine.ask("'$swish wrapper'((\n" +
+		       termNoFullStop(data.query.query) +
+		       "\n), ["+resvar+hashvar+"])", options);
+      elem.prologRunner('setState', "running");
+    }
   }
 
   function handleSuccess() {
     var elem = this.pengine.options.runner;
 
-    for(var i=0; i<this.data.length; i++) {
-      var answer = this.data[i];
-      if ( this.projection )
-	answer.projection = this.projection;
+    if ( elem.data(pluginName) == undefined )
+    { this.pengine.destroy();			/* element already gone */
+    } else {
+      for(var i=0; i<this.data.length; i++) {
+	var answer = this.data[i];
+	if ( this.projection )
+	  answer.projection = this.projection;
 
-      elem.prologRunner('renderAnswer', answer);
+	elem.prologRunner('renderAnswer', answer);
+      }
+      if ( this.time > 0.1 )	/* more than 0.1 sec. CPU (TBD: preference) */
+	addAnswer(elem, $.el.div(
+	  {class:"cputime"},
+	  $.el.span(this.time.toFixed(3),
+		    " seconds cpu time")));
+
+      elem.prologRunner('setState', this.more ? "wait-next" : "true");
     }
-    if ( this.time > 0.1 )	/* more than 0.1 sec. CPU (TBD: preference) */
-      addAnswer(elem, $.el.div(
-	{class:"cputime"},
-	$.el.span(this.time.toFixed(3),
-		  " seconds cpu time")));
-
-    elem.prologRunner('setState', this.more ? "wait-next" : "true");
   }
 
   function handleFailure() {
@@ -946,6 +1304,8 @@ define([ "jquery", "config", "preferences",
     if ( typeof(prompt) == "object" ) {
       if ( prompt.type == "trace" ) {
 	return elem.prologRunner('trace', this);
+      } else if ( prompt.type == "form" ) {
+	return elem.prologRunner('form', this);
       } else if ( prompt.type == "jQuery" ) {
 	return elem.prologRunner('jQuery', this);
       } else if ( prompt.type == "console" ) {
@@ -961,23 +1321,116 @@ define([ "jquery", "config", "preferences",
   }
 
   /**
+   * Make indicated source locations clickable.
+   * @param {String} msg is the HTML error message string
+   * @param {DOM} editor is the source editor; the editor for pengine://
+   * source locations
+   */
+  function clickableLocations(msg, editor) {
+    var pattern = /pengine:\/\/[-0-9a-f]{36}\/src:(\d+)/;
+
+    return msg.replace(pattern, function(matched) {
+      var line = matched.match(pattern)[1];
+      return "<a class='goto-error' title='Goto location'>" +
+               "<span class='glyphicon glyphicon-hand-right'></span> "+
+	       "<b>line <span class='line'>"+line+"</span></b></a>";
+    });
+  }
+
+  function gotoError(ev) {
+    var a        = $(ev.target).closest("a.goto-error");
+    var ctx      = $(ev.target).closest(".error-context");
+    var econtext = ctx.data("error_context");
+
+    if ( a[0] ) {
+      var line = parseInt(a.find("span.line").text());
+      var file = a.find("span.file").text();
+
+      ev.preventDefault();
+
+      if ( file ) {
+	ctx.closest("body.swish")
+	   .swish('playFile', {file:file, line:line});
+      } else {
+	$(econtext.editor).prologEditor('gotoLine', line);
+      }
+
+      return false;
+    } else if ( econtext.location.file ) {
+      ctx.closest("body.swish")
+	 .swish('playFile', econtext.location);
+    } else {
+      $(econtext.editor).prologEditor('gotoLine', econtext.location.line);
+    }
+  }
+
+  /**
    * handle `pengine_output/1`.  Note that compiler warnings and errors
    * also end up here. If they have a location, this is provided through
    * this.location, which contains `file`, `line` and `ch`.  We must use
    * this to indicate the location of the error in CodeMirror.
    */
 
-  function handleOutput() {
-    var elem = this.pengine.options.runner;
+  function handleOutput(msg) {
+    var elem = msg.pengine.options.runner;
+    var data = elem.data(pluginName);
 
-    this.data = this.data.replace(new RegExp("'[-0-9a-f]{36}':", 'g'), "")
-    if ( this.location ) {
-      this.data = this.data.replace(/pengine:\/\/[-0-9a-f]*\//, "");
-      $(".swish-event-receiver").trigger("source-error", this);
+    if ( !data )				/* runner is gone */
+      return;
+
+    if ( typeof(msg.data) == 'string' ) {
+      var econtext = {editor: data.query.editor};
+
+      msg.data = msg.data.replace(/'[-0-9a-f]{36}':/g, "")  /* remove module */
+
+      if ( msg.location ) {
+	var loc = msg.location;
+	var prefix = "swish://";
+	var span;
+
+	function clickableError() {
+	  var str = loc.file+":"+loc.line+":";
+	  if ( loc.ch ) str += loc.ch+":";
+	  str += "\\s*";
+
+	  msg.data = clickableLocations(
+			 msg.data.replace(new RegExp(str, "g"), ""),
+			 econtext.editor);
+
+	  span = elem.prologRunner('outputHTML', msg.data);
+
+	  $(span).addClass("error-context");
+	  $(span).append($.el.span({class:"glyphicon glyphicon-hand-right"}));
+	  $(span).attr("title", "Error in program.  Click to show in context");
+	  $(span).on("click", gotoError);
+	  $(span).data("error_context", econtext);
+	}
+
+	if ( loc.file.startsWith(prefix) ) {
+	  var file = loc.file.slice(prefix.length);
+	  econtext.location = {file:file, line:loc.line};
+	  clickableError();
+	} else if ( loc.file.startsWith("pengine://") ) {
+	  econtext.location = {line:loc.line};
+	  clickableError(data.query.editor);
+	}
+	registerSources(msg.pengine);
+	msg.error_context = econtext;
+	msg.error_handler = gotoError;
+	$(".swish-event-receiver").trigger("source-error", msg);
+      } else {
+	var span = elem.prologRunner('outputHTML',
+				     clickableLocations(msg.data,
+							econtext.editor));
+	$(span).on("click", gotoError);
+	$(span).data("error_context", econtext);
+      }
+    } else if ( typeof(msg.data) == 'object' ) {
+      elem.prologRunner(msg.data.action, msg.data);
+    } else {
+      console.log(msg.data);
     }
-
-    elem.prologRunner('outputHTML', this.data);
-    RS(elem).prologRunners('scrollToBottom');
+    elem.trigger('scroll-to-bottom');
   }
 
   function handleError() {
@@ -985,23 +1438,36 @@ define([ "jquery", "config", "preferences",
     var msg;
 
     if ( this.code == "too_many_pengines" ) {
-      msg = "Too many open queries.  Please complete some\n"+
-	    "queries by using |Next|, |Stop| or by\n"+
-	    "closing some queries.";
-    } else
-    { msg = String(this.data)
-                .replace(new RegExp("'"+this.pengine.id+"':", 'g'), "");
+      this.message = "Too many open queries.  Please complete some\n"+
+		     "queries by using |Next|, |Stop| or by\n"+
+		     "closing some queries.";
+    } else if ( typeof(this.data) == 'string' ) {
+      this.message = this.data
+			 .replace(new RegExp("'"+this.pengine.id+"':", 'g'), "");
+    } else {
+      this.message = "Unknown error";
     }
 
-    elem.prologRunner('error', msg);
+    elem.prologRunner('error', this);
     elem.prologRunner('setState', "error");
   }
 
   function handleAbort() {
     var elem = this.pengine.options.runner;
+    var data = elem.data('prologRunner');
 
-    elem.prologRunner('error', "** Execution aborted **");
-    elem.prologRunner('setState', "aborted");
+    if ( data ) {
+      elem.prologRunner('error', "** Execution aborted **");
+      elem.prologRunner('setState', "aborted");
+    } else {
+      this.pengine.destroy();
+    }
+  }
+
+  function handlePing() {
+    var elem = this.pengine.options.runner;
+
+    elem.prologRunner('ping', this.data);
   }
 
   /**
@@ -1045,55 +1511,6 @@ define([ "jquery", "config", "preferences",
 		   /*******************************
 		   *	       UTIL		*
 		   *******************************/
-
-  function dropdownButton(icon, options) {
-    if ( !options ) options = {};
-    var cls     = options.divClass;
-    var ulClass = options.ulClass;
-
-    var dropdown = $.el.div(
-      {class: "btn-group dropdown"+(cls?" "+cls:"")},
-      $.el.button(
-	{class:"dropdown-toggle",
-	 "data-toggle":"dropdown"},
-	icon),
-      $.el.ul({class:"dropdown-menu"+(ulClass?" "+ulClass:"")}));
-
-    if ( options.actions )
-      populateMenu($(dropdown), options.client, options.actions);
-
-    return dropdown;
-  }
-
-  function populateMenu(menu, client, actions) {
-    var ul = menu.find(".dropdown-menu");
-
-    function runMenu(a) {
-      var action = $(a).data('action');
-
-      if ( action )
-	action.call(client);
-
-      return false;
-    }
-
-    function addMenuItem(label, onclick) {
-      var a = $.el.a(label);
-
-       $(a).data('action', onclick);
-       ul.append($.el.li(a));
-    }
-
-    for(var a in actions) {
-      if ( actions.hasOwnProperty(a) ) {
-	addMenuItem(a, actions[a]);
-      }
-    }
-
-    ul.on("click", "a", function() { runMenu(this); } );
-
-    return menu;
-  }
 
   function glyphButton(glyph, title) {
     var btn = $.el.a({href:"#", class:"close btn btn-link btn-sm",

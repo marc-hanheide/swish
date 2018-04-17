@@ -1,22 +1,5 @@
 # SWISH TODO list
 
-## Infrastructure
-
-  - How/where to distribute the built files?  Generate a zip?  Distinct
-    git?
-
-## Design
-
-  - Modularize navbar population?
-
-## Window handling
-
-  - Add/remove new windows to the tile (pane.js can do that).
-  - Specify more about sized: minimum size, flexibility.  Probably
-    requires extending jquery.splitter.
-  - Allow moving panes around using drag/drop.  Allow organizing
-    in tabs?
-
 ## Query editor
 
   - Quickly create a query from a predicate?
@@ -34,6 +17,12 @@
 
   - Show stack and choice-points?
   - Display constraints.  How?
+  - breakpoints in notebooks (mostly needs to deal with source locations)
+
+## Highlighting
+
+  - Deal with multiple sources from a notebook (background programs).
+    - Analyse all programs and queries using a single callback?
 
 ## Rendering framework
 
@@ -41,36 +30,45 @@
     - Allow for rewriting answer terms?
     - Allow generating HTML?  How to deal with security?
 
+## Dashboard
+
+  - Complete type support for parameters/1
+  - Allow replacing the query with the dialog.  Can use query settings to
+    switch between the two modes.
+
 ## Sharing
 
-First option was TogetherJS.  Now doubting, as it my be much better to
+First option was TogetherJS.  Now doubting, as it may be much better to
 _not_ see exactly the same UI for cooperation.  What about
 
   - Allow for sharing editors
   - Allow sharing runners (= query+program)
-  - Provide chat and whiteboard (Anne)
+
+## Make teams
+
+  - A team has a homepage, which is a notebook.
+  - Workflow:
+    - Save a copy of the "Team homepage" example notebook.
+    - Turn into team homepage
+      - Add "team" tag
+      - Have a members query, returning a table.  Using an
+        HTML cell?
+      - Create as a copy from an example page?
+    - Invite team members (is this a general page behaviour)
+      - Input with look-ahead for searching people (or type
+	email).
+      - Text area for invitation
+      - Sends e-mail.
+  - Thus a team is
+    - A page
+    - Link to members
+  - Small installations can automatically add all users to the
+    one team.
 
 ## Saving files
 
-  - Look at [Dillinger markup editor](http://dillinger.io/)
-    - Save to github
-  - Save/Info dialogs
-    - Fork from history
-      - Now: Play, Save, clear/fill name.
-      - New: Fork button?
-        - Will do
-	  - Load new data
-	  - Save, clearing name.
-    - Indicate branch points in history?
-      - Requires complete graph in memory.
-
-## Login
-
-  - Social login
-    - login-with-google (oauth2)
-    - etc ...
-  - Make it easy to add HTTPS certificate based login.
-    - not SWISH specific
+  - Provide auto-save (in browser?)
+    - How to recover?
 
 ## Search
 
@@ -82,23 +80,12 @@ _not_ see exactly the same UI for cooperation.  What about
 
 ## Tabbed editor
 
-  - Notebook
-    - Connect query to above source.				[OK]
-    - Multiple sources:
-      - Allow naming sources?
-      - Allow one source to include others in the same notebook?
-    - Avoid hyperlinks to destroy the page.
-      - show predicate links in a modal dialog
-        - /pldoc/man?predicate=member/2				[OK]
-	- other predicate links.
-      - Use `target=` for others.
   - Source search: pass number of items being searched and
     if there are too many hits, balance over files.
   - Set tab-width per source?
   - Debug (trace) through included files
     - Works, except for following the source.
   - Deal with files/line numbers over multiple files
-  - Jump to source for goals.
   - Staging
     Control-S (whatever) saves data to `staging area'.
     - In addition to HEAD, introduce STAGE (gitty solution)?
@@ -107,16 +94,15 @@ _not_ see exactly the same UI for cooperation.  What about
       - Make sure running includes the browser version.
         - Send list of modified tabs
 
+## Notebooks
+
+  - Save notebook/program as new profile?
+  - Collapsible sections?
+  - Move sections (or select multiple)
+  - Delete query from menu?  Better: undo for delete.
+
 ## SWISH as Prolog frontend for local usage
 
-  - Deal with login
-    - Limit to localhost.  Proposed by Douglas Miles:
-      - Generate random initial URL
-      - Fire on this URL
-      - Esablish session cookie
-      - Demand this cookie and destroy the initial URL
-    - Shared/remote usage
-      - Describe how to setup HTTPS.
   - Improve source search
     - Full search
     - Search file names
@@ -134,11 +120,20 @@ _not_ see exactly the same UI for cooperation.  What about
     - Only send pengine_src with pengines.
     - Detect pengine_src based on alias?
 
+### Chat
+
+  - Get Anna's new avatars
+
+### Permalinks
+
+  - Handle external storage state
+  - Add permalink as metadata
+    - To generated PDF (R integration)
+    - To CSV
+
 ### Bugs
 
   - Colouring of /library/http/html_write.pl.  Broken sequences:
     - DCG exports
-    - use_module/2
     - ?- [file].
-    - :- op(1150, fx, [(mode), (public)]).
-
+    - Variable as goal.

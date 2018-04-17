@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2016, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Dialog components to interact with the gitty store.
@@ -78,8 +113,6 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
 
 	elem.gitty('showMetaData');
       });
-
-      return this;
     },
 
     /**
@@ -138,8 +171,6 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
 
 	tab.append(formel);
       });
-
-      return this;
     },
 
 
@@ -169,12 +200,15 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
 	  },
 	  $.el.tr($.el.th("Comment"),
 		  $.el.th("Date"),
-		  $.el.th("Author"),
-		  $.el.th("Changed"))));
+		  $.el.th("User"),
+		  $.el.th("Changed")),
+	  $.el.tbody()));
 
 	playButton = form.widgets.glyphIconButton(
-           "glyphicon-play",
-	   {title:"Open the highlighted version in SWISH"});
+           "play",
+	   { title:"Open the highlighted version in SWISH",
+	     class:"btn-primary"
+	   });
 	tab.append(playButton);
 	$(playButton).on("click", function(ev) {
 	  var row = elem.find("tr.success");
@@ -219,7 +253,7 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
     fillHistoryTable: function(history) {
       var gitty = this;
       var data  = this.data(pluginName);
-      var table = this.find(".table.gitty-history");
+      var table = this.find(".table.gitty-history tbody");
 
       for(var i=0; i<history.length; i++) {
 	var h = history[i];
@@ -235,9 +269,13 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
 	if ( m1.previous ) {
 	  if ( (m2 = data.commits[m1.previous]) &&
 	       (diff = diffMeta(m1, m2)) ) {
+	    var change = 0;
+
 	    for( var d in diff ) {
 	      if ( diff.hasOwnProperty(d) ) {
-		$(elem).append($.el.span({class:"change-type"}, d));
+		var ch = (d == "name" ? "forked "+m2.name : d);
+		$(elem).append((change++ == 0 ? undefined : ", "),
+			       $.el.span({class:"change-type"}, ch));
 	      }
 	    }
 	  }
@@ -433,6 +471,7 @@ define([ "jquery", "config", "form", "modal", "laconic" ],
     diffAttr("data");
     diffAttr("public");
     diffAttr("example");
+    diffAttr("name");
 
     if ( (d=diffTags(m1.tags, m2.tags)) )
       diff.tags = d;

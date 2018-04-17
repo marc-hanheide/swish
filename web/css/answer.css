@@ -15,7 +15,7 @@ div.render-multi {
 #render-select {
   position: absolute;
   background-color: #fff;
-  padding: 5px 20px;
+  padding: 5px 0px 5px 20px;
   border: 1px solid #000;
   border-radius: 5px;
   box-shadow: 5px 5px 5px #888;
@@ -34,6 +34,12 @@ div.render-multi {
   width: 20px; height: 20px;
 }
 
+div.render-item a {
+  float: right;
+  padding: 0px 10px 0px 10px;
+}
+
+
 		 /*******************************
 		 *	      ERRORS		*
 		 *******************************/
@@ -50,6 +56,27 @@ pre.console
   border: 0px;
   margin: 0px;
 }
+
+pre.measure
+{ padding: 0px;
+  border: 0px;
+  margin: 0px;
+  display: inline;
+}
+
+span.format
+{ white-space: pre;
+  font-family: Menlo,Monaco,Consolas,"Courier New",monospace;
+}
+
+a.download
+{ margin-right: 5px;
+}
+
+a.download span.glyphicon
+{ margin-left: 1ex;
+}
+
 
 		 /*******************************
 		 *	GENERAL RENDERERS	*
@@ -94,3 +121,8 @@ but that is rather expensive.
 
 .answer svg { vertical-align: top; }
 .render-graphviz { display: inline-block; }
+
+/* R */
+div.R.svg svg
+{ overflow: visible;
+}

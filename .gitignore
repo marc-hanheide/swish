@@ -1,4 +1,15 @@
+node_modules
 bower_components
-storage
+swish-bower-components.zip
+.bower-senitel
+passwd
+data
 log
+*.log
 *~
+config-enabled
+config-local*
+https
+.gdbinit
+web/icons/noble
+TAGS

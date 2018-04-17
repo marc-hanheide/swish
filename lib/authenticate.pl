@@ -1,128 +1,166 @@
-/*  Part of SWI-Prolog
+/*  Part of SWISH
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@vu.nl
+    E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2014-2015, VU University Amsterdam
+    Copyright (C): 2017, VU University Amsterdam
+			 CWI Amsterdam
+    All rights reserved.
 
-    This program is free software; you can redistribute it and/or
-    modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 2
-    of the License, or (at your option) any later version.
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
 
-    You should have received a copy of the GNU General Public
-    License along with this library; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
 
-    As a special exception, if you link this library with other files,
-    compiled with a Free Software compiler, to produce an executable, this
-    library does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however
-    invalidate any other reasons why the executable file might be covered by
-    the GNU General Public License.
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
 */
 
 :- module(swish_authenticate,
-	  [ swish_add_user/3		% +User, +Passwd, +Fields
-	  ]).
-:- use_module(library(pengines), []).
-:- use_module(library(lists)).
+          [ authenticate/2,                     % +Request, -Authentity
+            user_property/2                     % +Authentity, ?Property
+          ]).
+:- use_module(library(http/http_wrapper)).
 :- use_module(library(debug)).
-:- use_module(library(crypt)).
-:- use_module(library(http/http_authenticate)).
+:- use_module(library(broadcast)).
 
 :- use_module(config).
-:- use_module(page).
 
-:- multifile
-	swish_config:config/2,
-	swish_config:authenticate/2,
-	swish_config:verify_write_access/3.
+/** <module> Authentication access for SWISH
 
-/** <module> SWISH login management
+This module (depending on the loaded  configuration) identifies the user
+based on the HTTP request.
 
-This module provides basic login and  password management facilities for
-SWISH.  You can create an authenticated SWISH server by
-
-  1. Loading this library
-  2. Add one or more users to the passwd file using swish_add_user/3
-
-     ==
-     ?- swish_add_user("Bob", "Bob's secret", []).
-     ==
-
-As a result, trying to create the  first pengine (e.g., using _|Run!|_),
-the server will challenge the user.  The   logged  in  user is available
-through pengine_user/1.
+@see pep.pl for _authorization_ issues.
 */
 
-:- dynamic
-	password_file_cache/1.
-
-password_file(File) :-
-	password_file_cache(File), !.
-password_file(File) :-
-	absolute_file_name(swish(passwd), File, [access(read)]),
-	asserta(password_file_cache(File)).
-
-logged_in(Request, User) :-
-	password_file(File),
-	http_authenticate(basic(File), Request, [User|_Fields]), !,
-	debug(authenticate, 'Logged in as ~p', [User]).
-logged_in(_Request, _User) :-
-	throw(http_reply(authorise(basic('SWISH user')))).
-
-%%	pengines:authentication_hook(+Request, +Application, -User)
+%!  authenticate(+Request, -Identity:dict) is det.
 %
-%	Is called from the  /pengine/create   request  to  establish the
-%	logged in user.
+%   Establish the identity behind  the  HTTP   Request.  There  are  two
+%   scenarios.
+%
+%     - The entire server is protected using HTTP authentication.  In
+%       this case this predicate may throw an HTTP challenge or a
+%       forbidden exception.
+%     - The server allows for mixed anonymous and logged in usage. Login
+%       may use HTTP or federated login (oauth2).
+%
+%   @throws http_reply(_) HTTP authentication and permission exceptions
+%   if config-available/auth_http_always.pl is enabled.
+
+authenticate(Request, Auth) :-
+    http_peer(Request, Peer),
+    http_auth(Request, Auth0),
+    profile_auth(Request, Auth1),
+    Auth2 = Auth0.put(Auth1).put(peer, Peer),
+    identity(Auth2, Auth),
+    debug(authenticate, 'Identity: ~p', [Auth]).
+
+:- multifile
+    swish_config:user_info/3,
+    swish_config:authenticate/2,
+    swish_config:user_profile/2.
+
+http_auth(Request, Auth) :-
+    (   swish_config:authenticate(Request, User)   % throws http_reply(_)
+    ->  true
+    ;   swish_config:user_info(Request, local, UserInfo),
+        User = UserInfo.get(user)
+    ),
+    !,
+    Auth = auth{user:User, identity_provider:local, external_identity:User}.
+http_auth(_Request, auth{}).
+
+profile_auth(Request, Auth) :-
+    swish_config:user_profile(Request, Profile),
+    Auth = _{identity_provider: _,
+             external_identity: _,
+             profile_id:_},
+    Auth :< Profile,
+    !.
+profile_auth(_, auth{}).
+
+identity(Auth0, Auth) :-
+    _{identity_provider:Provider, external_identity:ExtID} :< Auth0,
+    !,
+    atomic_list_concat([Provider,ExtID], :, Identity),
+    Auth = Auth0.put(identity, Identity).
+identity(Auth, Auth).
+
+
+%!  user_property(+Identity, ?Property) is nondet.
+%
+%   True when Identity has Property. Defined properties are:
+%
+%     - peer(Atom)
+%     Remote IP address
+%     - identity(Atom)
+%     Identity as provided by some identity provider
+%     - identity_provider(Atom)
+%     Subsystem that identified the user
+%     - external_identity(Atom)
+%     Identity as provided by the identity_provider
+%     - profile_id(Atom)
+%     Identifier of the profile we have on this user.
+%     - login(Atom)
+%     Same as identity_provider(Atom)
+%     - name(Atom)
+%     Name associated with the identity
+%     - email(Atom)
+%     Email associated with the identity
+
+user_property(Identity, Property) :-
+    current_user_property(Property, How),
+    user_property_impl(Property, How, Identity).
+
+user_property_impl(Property, dict, Identity) :- !,
+    Property =.. [Name,Value],
+    Value = Identity.get(Name).
+user_property_impl(Property, broadcast, Identity) :-
+    broadcast_request(identity_property(Identity, Property)).
+user_property_impl(login(By), _, Identity) :-
+    By = Identity.get(identity_provider).
+
+
+current_user_property(peer(_Atom),                dict).
+current_user_property(identity(_Atom),            dict).
+current_user_property(external_identity(_String), dict).
+current_user_property(identity_provider(_Atom),   dict).
+current_user_property(profile_id(_Atom),          dict).
+current_user_property(avatar(_String),            dict).
+
+current_user_property(login(_IdProvider),         derived).
+current_user_property(name(_Name),                broadcast).
+current_user_property(email(_Email),              broadcast).
+
+
+		 /*******************************
+		 *        PENGINE HOOKS		*
+		 *******************************/
+
+%!  pengines:authentication_hook(+Request, +Application, -User)
+%
+%   Is called from the /pengine/create request   to establish the logged
+%   in user.
+
+:- multifile pengines:authentication_hook/3.
 
 pengines:authentication_hook(Request, _Application, User) :-
-	logged_in(Request, User), !.
-
-pengines:not_sandboxed(_User, _Application).
-
-
-%%	swish_config:verify_write_access(+Request, +File, +Options)
-
-swish_config:verify_write_access(Request, _File, _Options) :-
-	logged_in(Request, _User), !.
-
-%%	swish_config:authenticate(+Request, -User)
-%
-%	Called for all SWISH  actions.  May   be  used  to  restrict all
-%	access. Access can only be denied by throwing an exception.
-
-swish_config:authenticate(Request, User) :-
-	\+ swish_config(public_access, true),
-	logged_in(Request, User).
-
-
-%%	swish_add_user(+User, +Passwd, +Fields) is det.
-%
-%	Add a new user to the SWISH password file.
-
-swish_add_user(User, Passwd, Fields) :-
-	phrase("$1$", E, _),		% use Unix MD5 hashes
-	crypt(Passwd, E),
-	string_codes(Hash, E),
-
-	Entry = passwd(User, Hash, Fields),
-
-	absolute_file_name(swish(passwd), File,
-			   [access(write)]),
-	(   exists_file(File)
-	->  http_read_passwd_file(File, Data)
-	;   Data = []
-	),
-	(   selectchk(passwd(User, _, _), Data, Entry, NewData)
-	->  true
-	;   append(Data, [Entry], NewData)
-	),
-	http_write_passwd_file(File, NewData).
-
+    authenticate(Request, User).

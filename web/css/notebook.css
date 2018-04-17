@@ -1,10 +1,22 @@
 /* Style for the SWISH notebook
 */
 
+.notebook
+{ position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.nb-toolbar
+{ padding-left: 20px;
+}
+
 .nb-toolbar, .nb-content
 { width: 100%;
-  padding-left: 1em;
-  padding-right: 1em;
+}
+
+.notebook.hamburger .nb-toolbar {
+  display: none;
 }
 
 .nb-toolbar
@@ -13,6 +25,28 @@
   padding-bottom: 5px;
   margin-bottom: 1em;
   border-bottom: 1px solid #ddd;
+}
+
+.nb-toolbar .action-fullscreen
+{ right: 5px;
+  position: absolute;
+}
+
+div.notebook-menu {
+ display: none;
+}
+
+.notebook.hamburger div.notebook-menu {
+  display: block;
+  position: absolute;
+  top: 3px;
+  right: 1em;
+  z-index: 2000;
+}
+
+.notebook.hamburger .nb-view {
+  top: 0px;
+  height: 100%;
 }
 
 .nb-view
@@ -42,11 +76,19 @@
   border: 0px;
 }
 
+.nb-cell.html:not(.runnable)
+{ background-color: transparent;
+  border: 0px;
+}
+
 .nb-cell
-{ box-sizing: border-box;
-  background-color: #eee;
-  border: 1px solid #ccc;
-  border-radius: 5px;
+{ margin-left: 20px;
+  margin-right: 10px;
+  box-sizing: border-box;
+}
+
+.nb-cell:focus
+{ outline: 0px;
 }
 
 .nb-type-select
@@ -75,8 +117,27 @@
 { display: inline;
 }
 
-.nb-cell.active, .nb-cell.active > .with-buttons
-{ border: 1px solid #888;
+.nb-cell .close-select
+{ font-size: 150%;
+  padding: 0px 5px;
+  border: 0px;
+  color: #888;
+  background-color: transparent;
+  float: right;
+}
+
+.nb-cell.active
+{ margin-left: 8px;
+  border-left: 7px solid green !important;
+  padding-left: 5px;
+}
+
+.nb-cell.markdown.active > div.editor,
+.nb-cell.html.active > div.editor
+{ border: 1px dotted #888;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  margin-right: 52px;
 }
 
 .nb-cell.singleline div.editor
@@ -85,6 +146,10 @@
 
 .nb-cell.singleline .CodeMirror-hscrollbar
 { height: 0px;
+}
+
+.nb-cell .CodeMirror-scroll
+{ max-height: 40em;
 }
 
 .nb-cell .CodeMirror
@@ -96,13 +161,12 @@
   float: right;
 }
 
-.nb-cell.background span.glyphicon-cloud
-{ color: #bef;
+.nb-cell span.glyphicon-cloud
+{ color: black;
 }
 
-.nb-cell.query, .nb-cell.program
-{ border: 0px;
-  background: transparent;
+.nb-cell.background span.glyphicon-cloud
+{ color: white;
 }
 
 .nb-cell > .with-buttons
@@ -112,11 +176,27 @@
   width: calc(100% - 50px);
 }
 
+.nb-cell .nb-query-menu
+{ display: inline;
+  float: left;
+}
+
+.nb-query-menu button
+{ background: transparent;
+  padding: 3px 5px 0px 5px;
+  border: 0px;
+  color: #888;
+}
+
+
+.nb-query-menu button:hover
+{ color: #000;
+}
+
 .nb-cell .prolog-prompt
 { float: left;
-  width: 44px;			/* CodeMirror gutter width */
   padding-right: 0.3em;
-  padding-top: 0.2em;
+  padding-top: 0.25em;
   font-weight: bold;
   text-align: right;
 }
@@ -135,6 +215,9 @@
 
 .nb-placeholder
 { opacity: 0.5;
+  width: 90%;
+  margin: auto;
+  margin-top: 1ex;
 }
 
 /* Notebook markdown */
@@ -142,3 +225,43 @@
 .nb-cell.markdown pre.code    { width: 90%; margin: auto; margin-bottom: 1em;}
 .nb-cell.markdown dl.termlist { margin-left: 5%; }
 .nb-cell.markdown dl.termlist dd { margin-left: 2em; }
+
+/* Embedded documentation */
+
+.nb-cell.markdown .predicates dt
+{
+}
+
+.nb-cell.markdown .predicates dd
+{ margin-left: 2em;
+  margin-bottom: 1ex;
+}
+
+.nb-cell.markdown .predicates .pred-tag
+{ float: right;
+}
+
+a.btn-image
+{ padding: 1px 2px;
+}
+
+.nb-cell.program span.image-icon
+{ display: inline-block;
+  width: 18px;
+  height: 16px;
+  padding: 0px;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  vertical-align: middle;
+  background-image: url("../icons/local.png");
+}
+
+.nb-cell.program.background span.image-icon
+{ background-image: url("../icons/global.png");
+}
+
+span.menu-space
+{ width: 2ex;
+  display: inline-block;
+}
+

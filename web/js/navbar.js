@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2016, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Embed the navigation bar
@@ -8,8 +43,8 @@
  */
 
 
-define([ "jquery", "preferences", "laconic" ],
-       function($, preferences) {
+define([ "jquery", "preferences", "form", "laconic" ],
+       function($, preferences, form) {
 
 (function($) {
   var pluginName = 'navbar';
@@ -53,7 +88,7 @@ define([ "jquery", "preferences", "laconic" ],
      * @param {String} label Name of new dropdown to add
      */
     appendDropdown: function(label) {
-      var ul1 = this.children(".nav.navbar-nav");
+      var ul1 = this.children(".nav.navbar-nav.menubar");
       var ul2 = $.el.ul({name:label, class:"dropdown-menu"});
       var li  = $.el.li({class:"dropdown"},
 			$.el.a({class:"dropdown-toggle",
@@ -134,19 +169,37 @@ define([ "jquery", "preferences", "laconic" ],
    *   - An object with `.typeIcon` gets an icon indicating the type
    */
   function appendDropdown(dropdown, label, options) {
-    if ( options == "--" ) {
+    function glyph(name) {
+      if ( name ) {
+	return $.el.span({
+	  class:"dropdown-icon glyphicon glyphicon-" + name});
+      }
+    }
+
+    if ( options == undefined ) {
+      // ignored
+    } else if ( options == "--" ) {
       dropdown.append($.el.li({class:"divider"}));
     } else if ( typeof(options) == "function" ) {	/* Simple action */
       var a;
+      var i;
 
       if ( options.typeIcon ) {
-	a = $.el.a($.el.span({class:"dropdown-icon type-icon "+options.typeIcon}),
+	a = $.el.a(form.widgets.typeIcon(options.typeIcon),
 		   label);
+      } else if ( options.glyph ) {
+	a = $.el.a(glyph(options.glyph), label);
+      } else if ( (i=label.indexOf("(")) > 0 ) {
+	var accell = label.substr(i);
+	a = $.el.a({class:"accelerated"},
+		   label.substr(0,i).trim(),
+		   $.el.span({class:"accell-spacer"},accell),
+		   $.el.span({class:"accell-text"},accell));
       } else {
 	a = $.el.a(label);
       }
 
-      $(a).data('action', options);
+      $(a).data('navbar-action', options);
       if ( options.name )
 	$(a).attr("id", options.name);
 
@@ -180,10 +233,12 @@ define([ "jquery", "preferences", "laconic" ],
       } else if ( options.type == "submenu" ) {		/* Submenu */
 	var submenu = $.el.ul({class:"dropdown-menu sub-menu"});
 
-	dropdown.append($.el.li($.el.a({class:"trigger right-caret"}, label),
+	dropdown.append($.el.li($.el.a({class:"trigger right-caret"},
+				       glyph(options.glyph),
+				       label),
 				submenu));
 	if ( options.action )
-	  $(submenu).data('action', options.action);
+	  $(submenu).data('navbar-action', options.action);
 	if ( options.items ) {
 	  for(var i=0; i<options.items.length; i++) {
 	    $(submenu).append($.el.li($.el.a(options.items[i])));
@@ -210,8 +265,8 @@ define([ "jquery", "preferences", "laconic" ],
     if ( $(a).hasClass("trigger") ) {
       clickSubMenu.call(a, ev);
     } else {
-      var action = ($(a).data('action') ||
-		    $(a).parents("ul").data('action'));
+      var action = ($(a).data('navbar-action') ||
+		    $(a).parents("ul").data('navbar-action'));
 
       clickNotSubMenu.call(a, ev);
 

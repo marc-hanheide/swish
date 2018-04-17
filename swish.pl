@@ -1,30 +1,35 @@
-/*  Part of SWI-Prolog
+/*  Part of SWISH
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@cs.vu.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2014, VU University Amsterdam
+    Copyright (c)  2014-2017, VU University Amsterdam
+    All rights reserved.
 
-    This program is free software; you can redistribute it and/or
-    modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 2
-    of the License, or (at your option) any later version.
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
 
-    You should have received a copy of the GNU General Public
-    License along with this library; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
 
-    As a special exception, if you link this library with other files,
-    compiled with a Free Software compiler, to produce an executable, this
-    library does not by itself cause the resulting executable to be covered
-    by the GNU General Public License. This exception does not however
-    invalidate any other reasons why the executable file might be covered by
-    the GNU General Public License.
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
 */
 
 :- module(swish_app,
@@ -32,41 +37,23 @@
 	  ]).
 :- use_module(library(pengines)).
 :- use_module(library(http/http_dispatch)).
-:- use_module(library(http/http_path)).
 :- use_module(library(option)).
+:- use_module(library(apply)).
 :- use_module(library(settings)).
 
+:- use_module(lib/messages).
+:- use_module(lib/paths).
 :- use_module(lib/config, []).
 :- use_module(lib/page, []).
 :- use_module(lib/storage).
 :- use_module(lib/include).
-:- use_module(lib/csv).
+:- use_module(lib/swish_csv).
 :- use_module(lib/examples).
 :- use_module(lib/profiles).
 :- use_module(lib/highlight).
 :- use_module(lib/markdown).
+:- use_module(lib/chat, []).
 :- use_module(lib/template_hint, []).
-
-
-		 /*******************************
-		 *	       PATHS		*
-		 *******************************/
-
-user:file_search_path(swish_web, swish(web)).
-user:file_search_path(js,        swish_web(js)).
-user:file_search_path(css,       swish_web(css)).
-user:file_search_path(icons,     swish_web(icons)).
-
-set_swish_path :-
-	absolute_file_name(swish('swish.pl'), _,
-			   [file_errors(fail), access(read)]), !.
-set_swish_path :-
-	prolog_load_context(directory, Dir),
-	asserta(user:file_search_path(swish, Dir)).
-
-:- set_swish_path.
-
-http:location(swish, root(.), [priority(-100)]).
 
 
 		 /*******************************
@@ -76,6 +63,30 @@ http:location(swish, root(.), [priority(-100)]).
 % By default, enable CORS
 
 :- set_setting_default(http:cors, [*]).
+
+
+		 /*******************************
+		 *         LOCAL CONFIG		*
+		 *******************************/
+
+%!	load_config
+%
+%	Load files from config-enabled if  present. Currently loads from
+%	a single config-enabled directory, either  found locally or from
+%	the swish directory.
+
+load_config :-
+	absolute_file_name(config_enabled(.), Path,
+			   [ file_type(directory),
+			     access(read),
+			     file_errors(fail)
+			   ]), !,
+	atom_concat(Path, '/*.pl', Pattern),
+	expand_file_name(Pattern, Files),
+	maplist(ensure_loaded, Files).
+load_config.
+
+:- initialization(load_config, now).
 
 :- set_setting_default(http:prefix, '/swish').
 
@@ -114,6 +125,19 @@ http:location(swish, root(.), [priority(-100)]).
 %	  only running queries and saving files is restricted. Note
 %	  that this flag has no effect if no authentication module is
 %	  loaded.
+%	  - include_alias
+%	  Alias for searching files for `:- include(Alias(Name)).`
+%	  - ping
+%	  Ping pengine status every N seconds.  Updates sparkline
+%	  chart with stack usage.
+%	  - notebook
+%	  Dict holding options for notebooks:
+%	    - eval_script
+%	    Whether or not to evaluate JavaScript in cells
+%	    - fullscreen
+%	    Whether or not to start in fullscreen mode by default
+%	  - chat
+%	  Activate the chat interface
 
 % Allow other code to overrule the defaults from this file.
 term_expansion(swish_config:config(Config, _Value), []) :-
@@ -125,6 +149,12 @@ swish_config:config(application,        swish).
 swish_config:config(csv_formats,        [prolog]).
 swish_config:config(community_examples, false).
 swish_config:config(public_access,      false).
+swish_config:config(include_alias,	example).
+swish_config:config(ping,		10).
+swish_config:config(notebook,		_{eval_script: true,
+					  fullscreen: false
+					 }).
+swish_config:config(chat,		true).
 
 %%	swish_config:source_alias(Alias, Options) is nondet.
 %
@@ -138,6 +168,10 @@ swish_config:config(public_access,      false).
 %	    Only provide access to the file if it is loaded.
 
 
+% setup HTTP session management
+:- use_module(lib/session).
+
+
                  /*******************************
                  *   CREATE SWISH APPLICATION   *
                  *******************************/
@@ -148,9 +182,18 @@ swish_config:config(public_access,      false).
 :- pengine_application(swish).
 :- use_module(swish:lib/render).
 :- use_module(swish:lib/trace).
+:- use_module(swish:lib/projection).
+:- use_module(swish:lib/attvar).
 :- use_module(swish:lib/jquery).
+:- use_module(swish:lib/dashboard).
 :- use_module(swish:lib/swish_debug).
 :- use_module(swish:library(pengines_io)).
+:- use_module(swish:library(solution_sequences)).
+:- use_module(swish:library(aggregate)).
+:- if(exists_source(library(tabling))).
+:- use_module(swish:library(tabling)).
+:- endif.
+
 pengines:prepare_module(Module, swish, _Options) :-
 	pengines_io:pengine_bind_io_to_html(Module).
 
@@ -174,3 +217,5 @@ pengines:prepare_module(Module, swish, _Options) :-
 :- use_module(swish(lib/render/svgtree),  []).
 :- use_module(swish(lib/render/graphviz), []).
 :- use_module(swish(lib/render/c3),	  []).
+:- use_module(swish(lib/render/url),	  []).
+:- use_module(swish(lib/render/bdd),	  []).

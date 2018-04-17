@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2018, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * This file deals with tabbed panes.  It implements dynamic tabs on top
@@ -9,7 +44,7 @@
  */
 
 define([ "jquery", "form", "config", "preferences", "modal",
-	 "laconic", "search" ],
+	 "laconic", "search", "chatbell", "sourcelist" ],
        function($, form, config, preferences, modal) {
 var tabbed = {
   tabTypes: {},
@@ -23,6 +58,18 @@ var tabbed = {
     }
   }
 };
+
+tabbed.tabTypes.permalink = {
+  dataType: "lnk",
+  typeName: "program",
+  label: "Program",
+  create: function(dom, options) {
+    $(dom).addClass("prolog-editor")
+	  .prologEditor($.extend({save:true}, options))
+	  .prologEditor('makeCurrent');
+  }
+};
+
 
 (function($) {
   var pluginName = 'tabbed';
@@ -49,14 +96,50 @@ var tabbed = {
 	data.tabTypes = options.tabTypes || tabbed.tabTypes;
 	elem.data(pluginName, data);	/* store with element */
 
-	elem.addClass("tabbed");
+	elem.addClass("tabbed unloadable");
 	elem.tabbed('makeTabbed');
-	// Current tab could not handle source, create a new one
-	elem.on("source", function(ev, src) {
-	  elem.tabbed('tabFromSource', src);
-	});
 	elem.on("trace-location", function(ev, prompt) {
 	  elem.tabbed('showTracePort', prompt);
+	});
+	elem.on("data-is-clean", function(ev, clean) {
+	  var tab = $(ev.target).closest(".tab-pane");
+	  var a   = elem.tabbed('navTab', tab.attr('id'));
+
+	  if ( a )
+	  { if ( clean )
+	      a.removeClass("data-dirty");
+	    else
+	      a.addClass("data-dirty");
+	  }
+	});
+	elem.on("unload", function(ev) {
+	  if ( ev.target == elem[0] &&
+	       elem.closest(".swish").swish('preserve_state') ) {
+	    var state = elem[pluginName]('getState');
+	    localStorage.setItem("tabs", JSON.stringify(state));
+	  }
+	});
+	elem.on("restore", function(ev) {
+	  var state;
+
+	  if ( ev.target == elem[0] ) {
+	    // TBD: How to act with already open documents?
+	    try {
+	      var str = localStorage.getItem("tabs");
+	      var state = JSON.parse(str);
+	    } catch(err) {
+	    }
+
+	    if ( typeof(state) == "object" ) {
+	      elem[pluginName]('setState', state);
+	    }
+	  }
+	});
+	elem.on("preference", function(ev, pref) {
+	  if ( pref.name == "preserve-state" &&
+	       pref.value == false ) {
+	    localStorage.removeItem("tabs");
+	  }
 	});
       });
     },
@@ -104,7 +187,7 @@ var tabbed = {
 			    title: "Open a new tab"
 			  },
 			  glyphicon("plus"));
-      $(ul).append($.el.li({ role:"presentation" }, create));
+      $(ul).append($.el.li({ class: "tab-new", role:"presentation" }, create));
       $(create).on("click", function(ev) {
 	var tabbed = $(ev.target).parents(".tabbed").first();
 
@@ -117,6 +200,7 @@ var tabbed = {
       $(ul).on("shown.bs.tab", "a", function(ev) {
 	var newContentID  = $(ev.target).data("id");
 	$("#"+newContentID+" .swish-event-receiver").trigger("activate-tab");
+	$("#"+newContentID+" .storage").storage("activate");
       });
 
       if ( this.tabbed('navContent').children().length == 0 ) {
@@ -133,33 +217,192 @@ var tabbed = {
      * `tabSelect`.
      * @return {jQuery} object representing the created tab
      */
-    newTab: function(dom) {
+    newTab: function(dom, active) {
       var data = this.data(pluginName);
 
       if ( dom == undefined ) {
 	if ( data.newTab ) {
 	  dom = data.newTab();
 	} else {
+	  var sl;
 	  dom = this.tabbed('tabSelect');
 	  $(dom).append(this.tabbed('profileForm'),
 			$.el.hr(),
-			this.tabbed('searchForm'));
+			//this.tabbed('searchForm'),
+		        sl = $.el.div({class:"sourcelist"}));
+	  $(sl).sourcelist();
 	}
       }
 
-      return this.tabbed('addTab', dom, {active:true,close:true});
+      if ( active == undefined )
+	active = true;
+
+      return this.tabbed('addTab', dom, {active:active,close:true});
     },
 
+    getState: function() {
+      var state = this[pluginName]('get_ordered_storage').storage('getState');
+
+      state.pathname = window.location.pathname;
+      state.time     = new Date().getTime();
+
+      return state;
+    },
+
+    setState: function(state) {
+      var elem = this;
+
+      for(var i=0; i<state.tabs.length; i++) {
+	var data = state.tabs[i];
+	this[pluginName]('restoreTab', data);
+      }
+    },
+
+    restoreTab: function(data) {
+      var elem = this;
+      var tab;
+
+      data.query = null;		/* null keeps query */
+      data.noHistory = true;		/* do not update window path */
+
+      var existing = this.find(".storage").storage('match', data);
+      if ( existing ) {
+	tab = existing.closest(".tab-pane");
+	elem.tabbed('move_right', tab);
+      } else
+      { tab = undefined;
+      }
+
+      function restoreData(into, from) {
+	if ( from.data ) {
+	  into.find(".storage").storage('setValue', {
+	    data: from.data,
+	    role: 'source'
+	  });
+	}
+	if ( from.chatroom ) {
+	  into.find(".storage").storage('chat', from.chatroom);
+	}
+      }
+
+      if ( existing ) {
+	restoreData(tab, data);
+      } else if ( existing ) {
+	/* nothing to do? */
+      } else {				/* TBD: Centralise */
+	var select = this.find("div.tabbed-select");
+	var newtab;
+	var restoring = '<div class="restore-tab">Restoring ' +
+	                   (data.file||data.url) + " ..." +
+			'</div>';
+
+	if ( select.length > 0 )  {
+	  newtab = select.first().closest(".tab-pane");
+	  newtab.html(restoring);
+	} else {
+	  newtab = elem.tabbed('newTab', $(restoring), Boolean(data.active));
+	}
+
+	if ( data.st_type == "gitty" ) {
+	  var url = config.http.locations.web_storage + data.file;
+	  $.ajax({ url: url,
+		   type: "GET",
+		   data: {format: "json"},
+		   success: function(reply) {
+		     reply.url = url;
+		     reply.st_type = "gitty";
+		     reply.noHistory = true;
+		     if ( !elem.tabbed('setSource', newtab, reply) ) {
+		       console.log("Failed to restore", data.file);
+		       elem.tabbed('removeTab', tab.attr("id"));
+		     }
+		     restoreData(newtab, data);
+		     if ( newtab.hasClass("active") )
+		       newtab.find(".storage").storage("activate");
+		   },
+		   error: function(jqXHR) {
+		     modal.ajaxError(jqXHR);
+		   }
+	  });
+	} else if ( data.url ) {
+	  $.ajax({ url: data.url,
+		   type: "GET",
+		   data: {format: "json"},
+		   success: function(source) {
+		     var msg;
+
+		     if ( typeof(source) == "string" ) {
+		       msg = { data: source };
+		       msg.st_type = "external";
+		     } else if ( typeof(source) == "object" &&
+				 typeof(source.data) == "string" ) {
+		       msg = source;
+		       msg.st_type = "filesys";
+		     } else {
+		       alert("Invalid data");
+		       return;
+		     }
+		     msg.noHistory = true;
+		     msg.url = data.url;
+		     if ( !elem.tabbed('setSource', newtab, msg) ) {
+		       console.log("Failed to restore", data.url);
+		       elem.tabbed('removeTab', newtab.attr("id"));
+		     }
+		     restoreData(newtab, data);
+		     if ( newtab.hasClass("active") )
+		       newtab.find(".storage").storage("activate");
+		   },
+		   error: function(jqXHR) {
+		     modal.ajaxError(jqXHR);
+		   }
+	  });
+	} else {
+	  console.log("Cannot restore ", data);
+	}
+      }
+    },
+
+
     /**
-     * Add a new tab from the provided source
+     * Add a new tab from the provided source.  If there is a _select_
+     * (new) tab, open the data in this tab.
      */
     tabFromSource: function(src) {
-      var tab = this.tabbed('newTab', $("<span></span>"));
-      if ( typeof(src) == "object" )
-	delete src.newTab;
-      if ( !this.tabbed('setSource', tab, src) ) {
-	this.tabbed('removeTab', tab.attr("id"));
+      var elem = this;
+      var select = this.find("div.tabbed-select");
+
+      if ( typeof(src) == "string" )
+	src = {data:src};
+
+      function inNewTab() {
+	var tab = elem.tabbed('newTab', $("<span></span>"));
+	if ( !elem.tabbed('setSource', tab, src) ) {
+	  elem.tabbed('removeTab', tab.attr("id"));
+	}
       }
+
+      if ( select.length > 0 ) {
+	var tab = select.first().closest(".tab-pane");
+	this.tabbed('show', tab.attr("id"));
+	this.tabbed('setSource', tab, src);
+      } else if ( src.newTab || preferences.getVal("new-tab") ) {
+	inNewTab();
+      } else
+      { var tab;
+
+	this.find(".storage").each(function(i, st) {
+	  if ( $(st).storage('setSource', src) ) {
+	    tab = $(st).closest(".tab-pane");
+	    return false;
+	  }
+        });
+
+	if ( tab )
+	  this.tabbed('show', tab.attr("id"));
+	else
+	  inNewTab();
+      }
+
       return this;
     },
 
@@ -179,7 +422,7 @@ var tabbed = {
 	tab.tabbed('title', tabType.label, tabType.dataType);
 	tab.append(content);
 	tabType.create(content);
-	$(content).trigger("source", src);
+	$(content).storage('setSource', src);
 	return true;
       }
 
@@ -300,12 +543,15 @@ var tabbed = {
       li.remove();
 					/* HACK: close embedded runners */
       tab.find(".prolog-runner").prologRunner('close');
+      tab.find(".storage").storage('close');
       tab.remove();
       if ( new_active && new_active.length > 0 ) {
 	new_active.find("a").first().tab('show');
       } else if ( this.tabbed('navContent').children().length == 0 ) {
 	this.tabbed('newTab');
       }
+
+      $(".storage").storage('chat_status', true);
     },
 
     /**
@@ -313,11 +559,30 @@ var tabbed = {
      * @param {String} id is the id of the tab to show.
      */
     show: function(id) {
-      var a = this.tabbed('navTabs').find("a[data-id='"+id+"']");
-      if ( a.length > 0 ) {
+      var a = this.tabbed('navTab', id);
+      if ( a ) {
 	a.tab('show');
-	return this;
       }
+
+      $(".storage").storage('chat_status', true);
+    },
+
+    /**
+     * Move the argument tab or tab id to the right of all
+     * tabs.
+     */
+    move_right: function(tab) {
+      var id;
+      var ul = this.find(">ul");
+
+      if ( typeof(tab) == "string" )
+	id = tab;
+      else
+	id = tab.attr('id');
+
+      ul.find("a[data-id="+id+"]")
+        .closest("li")
+        .insertBefore(ul.children().last());
     },
 
     /**
@@ -331,6 +596,7 @@ var tabbed = {
      */
     tabLabel: function(id, label, close, type) {
       var close_button;
+      var chat;
 
       if ( close )
       { close_button = glyphicon("remove", "xclose");
@@ -340,11 +606,61 @@ var tabbed = {
 
       var a1 = $.el.a({class:"compact", href:"#"+id, "data-id":id},
 		      $.el.span({class:"tab-icon type-icon "+type}),
+		      $.el.span({class:"tab-dirty",
+		                 title:"Tab is modified. "+
+				       "See File/Save and Edit/View changes"}),
+	       chat = $.el.a({class:'tab-chat'}),
 		      $.el.span({class:"tab-title"}, label),
 		      close_button);
       var li = $.el.li({role:"presentation"}, a1);
 
+      $(chat).chatbell()
+             .on("click", function(ev) {
+	var id = $(ev.target).closest("a.compact").data("id");
+	$("#"+id).find(".storage").storage('chat');
+	return false;
+      });
+
       return li;
+    },
+
+    /**
+     * Calling obj.tabbed('anchor') finds the <a> element
+     * representing the tab label from the node obj that appears
+     * somewhere on the tab
+     */
+    anchor: function() {
+      var tab    = this.closest(".tab-pane");
+
+      if ( tab.length == 0 ) {
+	return undefined;		/* e.g., fullscreen mode */
+      }
+
+      var tabbed = tab.closest(".tabbed");
+      var id     = tab.attr("id");
+      var ul	 = tabbed.tabbed('navTabs');
+      var a      = ul.find("a[data-id="+id+"]");
+
+      return a;
+    },
+
+    /**
+     * Find the storage objects in the tabbed environment in the
+     * order of the tabs.  Note that the content divs maye be ordered
+     * differently.
+     */
+    get_ordered_storage: function() {
+      var elem = this;
+      var result = [];
+
+      this.find(">ul>li").each(function() {
+	var id = $(this).find(">a").data('id');
+	elem.find(">div.tab-content>div[id="+id+"] .storage").each(function() {
+	  result.push(this);
+	});
+      });
+
+      return $(result);
     },
 
     /**
@@ -354,21 +670,52 @@ var tabbed = {
      * @param {String} [type="pl"] is the new type for the tab.
      */
     title: function(title, type) {
-      var tab    = this.closest(".tab-pane");
-      var tabbed = tab.closest(".tabbed");
-      var id     = tab.attr("id");
-      var ul	 = tabbed.tabbed('navTabs');
-      var a      = ul.find("a[data-id="+id+"]");
+      var a = this.tabbed('anchor');
 
-      a.find(".tab-title").text(title);
-      if ( type ) {
-	var icon = a.find(".tab-icon");
-	icon.removeClass();
-	icon.addClass("tab-icon type-icon "+type);
+      if ( a ) {
+	a.find(".tab-title").text(title);
+	if ( type ) {
+	  var icon = a.find(".tab-icon");
+	  icon.removeClass();
+	  icon.addClass("tab-icon type-icon "+type);
+	}
       }
 
-      return tabbed;
+      return this;
     },
+
+    /**
+     * Set the chat message feedback for this tab
+     * @param {Object} [chats]
+     * @param {Number} [chats.count] number of available chat messages
+     * on the document.
+     */
+    chats: function(chats) {
+      var a = this.tabbed('anchor');
+
+      if ( a ) {
+	a.find(".chat-bell").chatbell('update', chats);
+      }
+
+      return this;
+    },
+
+    /**
+     * Increment the chat count and possibly associate the bell
+     * with the document identifier.
+     * @param {String} [docid] is the document identifier to associate
+     * with.
+     */
+    'chats++': function(docid) {
+      var a = this.tabbed('anchor');
+
+      if ( a ) {
+	a.find(".chat-bell").chatbell('chats++', docid);
+      }
+
+      return this;
+    },
+
 
     /**
      * Default empty tab content that allows the user to transform
@@ -409,9 +756,8 @@ var tabbed = {
 	var type    = $(ev.target).data('type');
 	var tab     = $(ev.target).closest(".tab-pane");
 	var content = $.el.div();
-	var options = tabbed.tabTypes[type];
+	var options = $.extend({}, tabbed.tabTypes[type]);
 	var profile = tab.find("label.active > input[name=profile]").val();
-	var options = {};
 
 	if ( profile ) {
 	  options.profile = profile;
@@ -427,10 +773,16 @@ var tabbed = {
 	tabbed.tabTypes[type].create(content, options);
       });
       $(g).addClass("swish-event-receiver");
-      $(g).on("source", function(ev, src) {
+      $(g).on("download save fileInfo print", function(ev) {
 	var tab = $(ev.target).closest(".tab-pane");
-	if ( tab.is(":visible") &&
-	     tab.closest(".tabbed").tabbed('setSource', tab, src) ) {
+	if ( tab.is(":visible") ) {
+	  var typelabel = { "download" : "you wish to download",
+			    "save"     : "you wish to save",
+			    "print"    : "you wish to print",
+			    "fileInfo" : "for which you want details"
+	  };
+
+	  modal.alert("Please activate the tab "+typelabel[ev.type]);
 	  ev.stopPropagation();
 	}
       });
@@ -444,6 +796,9 @@ var tabbed = {
       return dom;
     },
 
+    /**
+     * Find sources
+     */
     searchForm: function() {
       var sform = $.el.form({class: "search-sources"},
 	$.el.label({class:"control-label"}, 'Open source file containing'),
@@ -466,6 +821,11 @@ var tabbed = {
       $(sform).find("input.search").search();
 
       return sform;
+    },
+
+    sourceList: function() {
+
+
     },
 
     profileForm: function() {
@@ -522,6 +882,12 @@ var tabbed = {
      */
     navTabs: function() {
       return this.find("ul.nav-tabs").first();
+    },
+
+    navTab: function(id) {
+      var a = this.find("ul.nav-tabs").first().find("a[data-id='"+id+"']");
+      if ( a.length > 0 )
+	return a;
     },
 
     navContent: function() {

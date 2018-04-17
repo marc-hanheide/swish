@@ -56,6 +56,8 @@ var tokenHelp = {
 			 return localDef("CHR constraint",data,cm)
 		       },
   "head_unreferenced": "Predicate is not called",
+  "unused_import":     "Imported predicate is not used",
+  "undefined_import":  "Imported predicate is not defined",
   "head_constraint":   "CHR constraint",
 
   "file": function(data, cm) {
@@ -97,7 +99,12 @@ var tokenHelp = {
   "chars":     "List of one-character atoms",
   "string":    "Packed string (SWI7, use `text` for a list of codes)",
   "qatom":     "Quoted atom",
+  "uatom":     "Uppercase atom due to var_prefix flag",
   "tag":       "Tag of a SWI7 dict",
+  "ext_quant": "Existential quantification operator",
+  "instantiation_error": "No variable allowed here",
+
+  "string_terminal": "Terminal (DCG)",
 
   "head":       null,
   "control":    null,

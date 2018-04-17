@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2018, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Provide the query editing facilities.
@@ -9,10 +44,11 @@
  * @requires editor
  */
 
-define([ "jquery", "config", "preferences", "cm/lib/codemirror",
+define([ "jquery", "config", "preferences", "cm/lib/codemirror", "modal",
+	 "utils",
 	 "laconic", "editor"
        ],
-       function($, config, preferences, CodeMirror) {
+       function($, config, preferences, CodeMirror, modal, utils) {
 
 (function($) {
   var pluginName = 'queryEditor';
@@ -36,27 +72,22 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
       return this.each(function() {
 	var elem   = $(this);
 	var data   = $.extend({}, defaults, options);
-	var qediv  = $.el.div({class:"query",style:"height:100%"});
+	var qediv  = $.el.div({class:"query"});
 	var tabled = tableCheckbox(data);
 
-        var content =
-	  $.el.table({class:"prolog-query"},
-		     $.el.tr($.el.td({class:"prolog-prompt"},
-				     "?-"),
-			     $.el.td({colspan:2, style:"height:100%"},
-				     qediv),
-			     $.el.td()),
-		     $.el.tr($.el.td(),
-			     $.el.td({class:"buttons-left"},
-				     examplesButton(data),
-				     historyButton(data),
-				     aggregateButton(data)),
-			     $.el.td({class:"buttons-right"},
-				     tabled,
-				     runButton(data))));
+	elem.addClass("prolog-query-editor swish-event-receiver reactive-size " +
+		      "unloadable");
 
-	elem.addClass("prolog-query-editor swish-event-receiver");
-	elem.append(content);
+	elem.append(qediv,
+		    $.el.div({class:"prolog-prompt"}, "?-"),
+		    $.el.div({class:"query-buttons"},
+			     $.el.span({class:"buttons-left"},
+				       examplesButton(data),
+				       historyButton(data),
+				       aggregateButton(data)),
+			     $.el.span({class:"buttons-right"},
+				       tabled,
+				       runButton(data))));
 
 	function tableSelected() {
 	  return $(tabled).find("input").prop("checked");
@@ -72,22 +103,63 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
 				}
 		              });
 
-	if ( typeof(data.examples) == "object" &&
-	     data.examples[0] &&
-	     !$(qediv).prologEditor('getSource', "query") )
-	  $(qediv).prologEditor('setSource', data.examples[0]);
+	elem.data(pluginName, data);
+
+	if ( !$(qediv).prologEditor('getSource', "query") )
+	{ if ( typeof(data.examples) == "object" ) {
+	    if ( data.examples[0] )
+	      $(qediv).prologEditor('setSource', data.examples[0]);
+	  } else {
+	    elem[pluginName]('setProgramEditor', $(data.editor), true);
+	  }
+	}
 
 	elem.on("current-program", function(ev, editor) {
 	  elem[pluginName]('setProgramEditor', $(editor));
 	});
-	elem.on("program-loaded", function(ev, editor) {
-	  if ( $(data.editor).data('prologEditor') == $(editor).data('prologEditor') ) {
-	    var exl = data.examples();
-	    elem.queryEditor('setQuery', exl && exl[0] ? exl[0] : "");
+	elem.on("program-loaded", function(ev, options) {
+	  var query = options.query;
+
+	  if ( query != null ) {		/* null: keep */
+	    if ( query == undefined ) {
+	      if ( $(data.editor).data('prologEditor') ==
+		   $(options.editor).data('prologEditor') ) {
+		var exl = data.examples();
+		query = exl && exl[0] ? exl[0] : "";
+	      }
+	    }
+	    elem.queryEditor('setQuery', query);
 	  }
 	});
+	elem.on("unload", function(ev, rc) {
+	  if ( elem.closest(".swish").swish('preserve_state') ) {
+	    var state = elem[pluginName]('getState');
+	    if ( state )
+	      localStorage.setItem("query", JSON.stringify(state));
+	  }
+	});
+	elem.on("restore", function(ev, rc) {
+	  if ( elem[pluginName]('getQuery') == "" ) {
+	    var state;
+	    // called with explicit query
+	    // TBD: not save in this case?
+	    try {
+	      var str = localStorage.getItem("query");
+	      state = JSON.parse(str);
+	    } catch(err) {
+	    }
 
-	elem.data(pluginName, data);
+	    if ( typeof(state) == "object" ) {
+	      elem[pluginName]('setState', state);
+	    }
+	  }
+	});
+	elem.on("preference", function(ev, pref) {
+	  if ( pref.name == "preserve-state" &&
+	       pref.value == false ) {
+	    localStorage.removeItem("query");
+	  }
+	});
       });
     },
 
@@ -95,8 +167,11 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
      * @param {jQuery} editor has become the new current program
      * editor.  Update the examples and re-run the query highlighting.
      */
-    setProgramEditor: function(editor) {
+    setProgramEditor: function(editor, force) {
       var data = this.data(pluginName);
+
+      if ( data.editor == editor[0] && !force )
+	return this;
 
       data.editor = editor[0];
       if ( data.editor ) {
@@ -115,7 +190,7 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
 	    var bg  = $(".background.prolog.source").text();
 
 	    if ( bg )
-	      src += '\n\n' + bg;
+	      src += '\n%@background@\n' + bg;
 
 	    return src;
 	  };
@@ -127,7 +202,7 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
 	};
 
 	var exl = data.examples();
-	if ( exl && exl[0] ) {
+	if ( exl && exl[0] && this.queryEditor('isClean') ) {
 	  this.queryEditor('setQuery', exl[0]);
 	} else {
 	  editor.prologEditor('refreshHighlight');
@@ -135,6 +210,18 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
       } else
       { data.examples = "";
       }
+    },
+
+    /**
+     * @returns {jQuery} the associated program editor
+     */
+    getProgramEditor: function() {
+      var data = this.data(pluginName);
+
+      if ( data.editor )
+	return $(data.editor);
+      else
+	return $();
     },
 
     /**
@@ -168,10 +255,31 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
 
       if ( clear === true )
 	ul.html("");
+      ul.find("li.add-example, li.divider").remove();
       for(var i=0; i<list.length; i++) {
 	ul.append($.el.li($.el.a(list[i])));
       }
       ul.data('examples', list.slice(0));
+      ul.append($.el.li({class:"divider"}));
+      ul.append($.el.li({class:'add-example'},
+			$.el.a("Add current query to examples")));
+
+      return this;
+    },
+
+    /**
+     * Add the current query to the examples in the program
+     */
+    addExample: function()
+    { var query	= this.find(".query").prologEditor('getSource');
+
+      if ( query.trim() != "" ) {
+	$(".swish-event-receiver:visible")
+	     .trigger("addExample",
+		      this.find(".query").prologEditor('getSource'));
+      } else
+      { modal.alert("The query window is empty");
+      }
 
       return this;
     },
@@ -194,15 +302,47 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
 
       if ( query ) {
 	var li;
+	var a;
 
 	if ( (li=findInHistory()) )
 	  li.remove();
 	if ( ul.children().length >= data.maxHistoryLength )
 	  ul.children().first().remove();
-	ul.append($.el.li($.el.a(query)));
+	ul.append($.el.li(a=$.el.a(query)));
+	$(a).data('time', (new Date().getTime())/1000);
       }
 
       return this;
+    },
+
+    /**
+     * @return {Array} An arrayt of strings representing the
+     * current history.
+     */
+    getHistory: function() {
+      var ul   = this.find("ul.history");
+      var h = [];
+
+      ul.children().each(function() {
+	var a =	$(this).find("a");
+	h.push({
+	  query: a.text(),
+	  time:  a.data('time')
+	});
+      });
+
+      return h;
+    },
+
+    restoreHistory: function(h) {
+      var ul   = this.find("ul.history");
+
+      ul.html("");
+      for(var i=0; i<h.length; i++) {
+	var a;
+	ul.append($.el.li(a= $.el.a(h[i].query)));
+	$(a).data('time', h[i].time);
+      }
     },
 
     /**
@@ -210,9 +350,25 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
      * @param {String} query the new value of the query
      */
     setQuery: function(query) {
-      return this.find(".query")
-	         .prologEditor('setSource', query)
-		 .focus();
+      var data = this.data(pluginName);
+
+      data.cleanGen =
+	this.find(".query")
+	    .prologEditor('setSource', query)
+	    .focus()
+	    .prologEditor('changeGen');
+
+      return this;
+    },
+
+    isClean: function() {
+      var data = this.data(pluginName);
+
+      return ( !this.queryEditor('getQuery') ||
+	       ( data.cleanGen &&
+		 this.find(".query").prologEditor('isClean', data.cleanGen)
+	       )
+	     );
     },
 
     /**
@@ -222,65 +378,16 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
       return this.find(".query").prologEditor('getSource', "query");
     },
 
-    /**
-     * @param {String} [query] query to get the variables from
-     * @return {List.string} is a list of Prolog variables without
-     * duplicates
-     */
-
-    variables: function(query) {
-      var qspan = $.el.span({class:"query cm-s-prolog"});
-      var vars = [];
-
-      CodeMirror.runMode(query, "prolog", qspan);
-      $(qspan).find("span.cm-var").each(function() {
-	var name = $(this).text();
-	if ( vars.indexOf(name) < 0 )
-	  vars.push(name);
-      });
-
-      return vars;
+    getState: function() {
+      return {
+        query:   this[pluginName]('getQuery'),
+        history: this[pluginName]('getHistory')
+      };
     },
 
-    /**
-     * Wrap current query in a solution modifier.
-     * TBD: If there is a selection, only wrap the selection
-     *
-     * @param {String} wrapper defines the type of wrapper to use.
-     */
-    wrapSolution: function(wrapper) {
-      var query = this.queryEditor('getQuery').replace(/\.\s*$/m, "");
-      var that = this;
-      var vars = this.queryEditor('variables', query);
-
-      function wrapQuery(pre, post) {
-	that.queryEditor('setQuery', pre + "("+query+")" + post + ".");
-	return that;
-      }
-
-      function order(l) {
-	var order = [];
-	for(var i=0; i<vars.length; i++)
-	  order.push("asc("+vars[i]+")");
-	return order.join(",");
-      }
-
-      switch ( wrapper ) {
-        case "Aggregate (count all)":
-	  return wrapQuery("aggregate_all(count, ", ", Count)");
-        case "Order by":
-	  return wrapQuery("order_by(["+order(vars)+"], ", ")");
-        case "Distinct":
-	  return wrapQuery("distinct(["+vars.join(",")+"], ", ")");
-        case "Limit":
-	  return wrapQuery("limit(10, ", ")");
-        case "Time":
-	  return wrapQuery("time(", ")");
-        case "Debug (trace)":
-	  return wrapQuery("trace, ", "");
-	default:
-	  alert("Unknown wrapper: \""+wrapper+"\"");
-      }
+    setState: function(state) {
+      this[pluginName]('restoreHistory', state.history||[]);
+      this[pluginName]('setQuery', state.query||"");
     },
 
     /**
@@ -304,7 +411,11 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
       }
       $(".swish-event-receiver").trigger("clearMessages");
 
-      var query = { query:q, editor: data.editor };
+      var query = { query: q,
+		    editor: data.editor,
+		    query_editor: this.find(".query")
+		  };
+
       if ( typeof(data.source) == "function" )
 	query.source = data.source(q);
       else if ( typeof(data.source) == "string" )
@@ -328,7 +439,7 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
   */
 
   function Q(from) {
-    return $(from).parents(".prolog-query-editor");
+    return $(from).closest(".prolog-query-editor");
   }
 
   function dropup(cls, label, options) {
@@ -342,7 +453,12 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
       $.el.ul({class:"dropdown-menu "+cls}));
 
     $(dropup).on("click", "a", function() {
-      Q(this).queryEditor('setQuery', $(this).text());
+      var li = $(this).closest("li");
+
+      if ( li.hasClass("add-example") )
+	Q(this).queryEditor('addExample');
+      else
+	Q(this).queryEditor('setQuery', $(this).text());
     });
 
     return dropup;
@@ -360,9 +476,10 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
     }
 
     if ( typeof(options.examples) == "function" ) {
+      var copy = $.extend({}, options);
       $(el).mousedown(function(ev) {
 			if ( ev.which == 1 ) {
-			  updateExamples(options);
+			  updateExamples(copy);
 			}
 		      });
     } else if ( options.examples ) {
@@ -377,7 +494,14 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
   }
 
   function historyButton(options) {
-    return dropup("history", "History", options);
+    var menu = dropup("history", "History", options);
+
+    $(menu).on("mouseenter", "li", function(ev) {
+      var a = $(ev.target).closest("li").find("a");
+      a.attr("title", utils.ago(a.data('time')));
+    });
+
+    return menu;
   }
 
   function aggregateButton(options) {
@@ -385,6 +509,7 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
     var list = options.aggregates ||
       [ "Aggregate (count all)",
 	"--",
+	"Projection",
 	"Order by",
 	"Distinct",
 	"Limit",
@@ -413,7 +538,7 @@ define([ "jquery", "config", "preferences", "cm/lib/codemirror",
     }
 
     $(dropup).on("click", "a", function() {
-      Q(this).queryEditor('wrapSolution', $(this).text());
+      Q(this).find(".query").prologEditor('wrapSolution', $(this).text());
     });
 
     return dropup;

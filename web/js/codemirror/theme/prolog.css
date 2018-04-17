@@ -1,14 +1,17 @@
 .cm-s-prolog span.cm-number	       {color: #000;}
 .cm-s-prolog span.cm-neg-number	       {color: #000;}
-.cm-s-prolog span.cm-atom	       {color: #762;}
-.cm-s-prolog span.cm-qatom	       {color: #008;}
+.cm-s-prolog span.cm-atom	       {color: #730;}
+.cm-s-prolog span.cm-uatom	       {color: #730;}
+.cm-s-prolog span.cm-qatom	       {color: #008; white-space: pre;}
 .cm-s-prolog span.cm-string	       {color: #008; font-style: italic;}
+.cm-s-prolog span.cm-string_terminal   {color: #008; font-style: italic;}
 .cm-s-prolog span.cm-bqstring	       {color: #040; font-style: italic;}
 .cm-s-prolog span.cm-codes	       {color: #040; font-style: italic;}
 .cm-s-prolog span.cm-chars	       {color: #040; font-style: italic;}
 .cm-s-prolog span.cm-functor	       {color: #000; font-style: italic;}
 .cm-s-prolog span.cm-tag	       {color: #000; font-weight: bold;}
 .cm-s-prolog span.cm-key	       {color: #000; font-weight: bold;}
+.cm-s-prolog span.cm-ext_quant	       {color: #000; font-weight: bold;}
 .cm-s-prolog span.cm-qq_content        {color: #900;}
 .cm-s-prolog span.cm-qq_open,
 .cm-s-prolog span.cm-qq_sep,
@@ -22,6 +25,7 @@
 .cm-s-prolog span.cm-singleton	       {color: #800; font-weight: bold;} /* Singleton */
 .cm-s-prolog span.cm-identifier	       {font-weight: bold;}
 .cm-s-prolog span.cm-module	       {color: #549;}
+.cm-s-prolog span.cm-constraint        {color: #008b8b;} /*dark-cyan*/
 .cm-s-prolog span.cm-head_exported     {color: blue; font-weight: bold;}
 .cm-s-prolog span.cm-head_unreferenced {color: red; font-weight: bold;}
 .cm-s-prolog span.cm-head_built_in     {background: orange; font-weight: bold;}
@@ -48,9 +52,15 @@
 .cm-s-prolog span.cm-no_option_name    {color: red;}
 .cm-s-prolog span.cm-flag_name         {color: blue;}
 .cm-s-prolog span.cm-no_flag_name      {color: red;}
-.cm-s-prolog span.cm-error             {border-bottom: 1px dashed #f00; }
-.cm-s-prolog span.cm-link	       {color: #762;}
+.cm-s-prolog span.cm-error             {border-bottom: 2px dotted #f00; }
+.cm-s-prolog span.cm-instantiation_error {border-bottom: 2px dotted #f00; }
+/* Only on FF :(
+.cm-s-prolog span.cm-instantiation_error {text-decoration: underline wavy red; }
+*/
+.cm-s-prolog span.cm-link	       {color: #730;}
 .cm-s-prolog span.cm-expanded	       {color: blue; text-decoration: underline;}
+.cm-s-prolog span.cm-undefined_import  {color: red;}
+.cm-s-prolog span.cm-unused_import     {color: blue; background: pink; }
 /* xpce */
 .cm-s-prolog span.cm-xpce_method         {font-weight: bold;}
 .cm-s-prolog span.cm-xpce_class_built_in {color: blue;}

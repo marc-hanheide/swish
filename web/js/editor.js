@@ -1,3 +1,38 @@
+/*  Part of SWISH
+
+    Author:        Jan Wielemaker
+    E-mail:        J.Wielemaker@cs.vu.nl
+    WWW:           http://www.swi-prolog.org
+    Copyright (C): 2014-2017, VU University Amsterdam
+			      CWI Amsterdam
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in
+       the documentation and/or other materials provided with the
+       distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+    FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+    COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+    BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+    ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /**
  * @fileOverview
  * Prolog editor plugin based on [CodeMirror](http://codemirror.net)
@@ -15,6 +50,7 @@ define([ "cm/lib/codemirror",
 	 "cm/mode/prolog/prolog-template-hint",
 	 "modal",
 	 "tabbed",
+	 "prolog",
 
 	 "storage",
 
@@ -32,6 +68,10 @@ define([ "cm/lib/codemirror",
 	 "cm/addon/hint/anyword-hint",
 	 "cm/addon/display/placeholder",
 	 "cm/addon/runmode/runmode",
+	 "cm/addon/search/search",
+	 "cm/addon/search/searchcursor",
+	 "cm/addon/search/jump-to-line",
+	 "cm/addon/dialog/dialog",
 
 	 "cm/addon/hover/text-hover",
 	 "cm/addon/hover/prolog-hover",
@@ -44,7 +84,7 @@ define([ "cm/lib/codemirror",
 	 "cm/keymap/emacs",
        ],
        function(CodeMirror, config, preferences, form, templateHint,
-		modal, tabbed) {
+		modal, tabbed, prolog) {
 
 (function($) {
   var pluginName = 'prologEditor';
@@ -89,6 +129,8 @@ define([ "cm/lib/codemirror",
       save: false
     }
   };
+
+  var lastEditor;
 
   /** @lends $.fn.prologEditor */
   var methods = {
@@ -137,6 +179,8 @@ define([ "cm/lib/codemirror",
 
 	if ( options.mode == "prolog" ) {
 	  data.role = options.role;
+	  if ( options.getSource )
+	    data.getSource = options.getSource;
 
 	  if ( config.http.locations.cm_highlight ) {
 	    options.prologHighlightServer =
@@ -153,8 +197,47 @@ define([ "cm/lib/codemirror",
 	    options.continueComments = "Enter";
 	    options.gutters = ["Prolog-breakpoints"]
 	  }
+
+	  /*
+	   * Long click detection and handling.
+	   */
+	  data.long_click = {};
+	  function moveLongClick(ev) {
+	    var lc = data.long_click;
+	    var dx = ev.clientX - lc.clientX;
+	    var dy = ev.clientY - lc.clientY;
+	    if ( Math.sqrt(dx*dx+dy*dy) > 5 )
+	      cancelLongClick();
+	  }
+	  function cancelLongClick() {
+	    elem.off("mousemove", moveLongClick);
+	    var lc = data.long_click;
+	    if ( lc.timeout ) {
+	      clearTimeout(lc.timeout);
+	      lc.target  = undefined;
+	      lc.timeout = undefined;
+	    }
+	  }
+
+	  elem.on("mousedown", ".CodeMirror-code", function(ev) {
+	    var lc = data.long_click;
+
+	    lc.clientX = ev.clientX;
+	    lc.clientY = ev.clientY;
+	    elem.on("mousemove", moveLongClick);
+	    data.long_click.timeout = setTimeout(function() {
+	      cancelLongClick();
+	      elem.prologEditor('contextAction');
+	    }, 500);
+	  });
+	  elem.on("mouseup", function(ev) {
+	    cancelLongClick();
+	  });
 	}
 
+	/*
+	 * Create CodeMirror
+	 */
 	if ( (ta=elem.children("textarea")[0]) ) {
 	  function copyData(name) {
 	    var value = $(ta).data(name);
@@ -168,6 +251,7 @@ define([ "cm/lib/codemirror",
 	  copyData("title");
 	  copyData("meta");
 	  copyData("st_type");
+	  copyData("chats");
 
 	  data.cm = CodeMirror.fromTextArea(ta, options);
 	} else {
@@ -183,6 +267,19 @@ define([ "cm/lib/codemirror",
 	elem.addClass("prolog-editor");
 	elem.on("preference", function(ev, pref) {
 	  elem.prologEditor('preference', pref);
+	});
+	elem.on("print", function() {
+	  if ( data.role != "query" )
+	    elem.prologEditor('print');
+	});
+	elem.on("clearMessages", function(ev) {
+	  elem.prologEditor('clearMessages');
+	});
+	elem.on("edit-command", function(ev, command) {
+	  elem.prologEditor('execCommand', command);
+	});
+	data.cm.on("blur", function(ev) {
+	  elem.prologEditor('execCommand', 'prepare');
 	});
 
 	if ( options.save ) {
@@ -200,9 +297,6 @@ define([ "cm/lib/codemirror",
 	  elem.on("source-error", function(ev, error) {
 	    elem.prologEditor('highlightError', error);
 	  });
-	  elem.on("clearMessages", function(ev) {
-	    elem.prologEditor('clearMessages');
-	  });
 	  elem.on("pengine-died", function(ev, id) {
 	    if ( data.pengines ) {
 	      var i = data.pengines.indexOf(id);
@@ -213,6 +307,9 @@ define([ "cm/lib/codemirror",
 	      data.traceMark.clear();
 	      data.traceMark = null;
 	    }
+	  });
+	  elem.on('addExample', function(ev, query) {
+	    elem.prologEditor('addExample', query);
 	  });
 	  data.cm.on("gutterClick", function(cm, n) {
 	    var info = cm.lineInfo(n);
@@ -226,7 +323,22 @@ define([ "cm/lib/codemirror",
 	    else
 	      cm.setGutterMarker(n, "Prolog-breakpoints", makeMarker());
 	  });
-	}
+	} /* end if prolog source */
+
+	data.cm.on("change", function(cm, change) {
+	  var clean;
+
+	  if ( change.origin == "setValue" ) {
+	    clean = true;
+	  } else {
+	    var store = elem.data("storage");
+	    var gen = store ? store.cleanGeneration : data.cleanGeneration;
+
+	    clean = data.cm.isClean(gen);
+	  }
+
+	  elem.prologEditor('markClean', clean);
+	});
       });
     },
 
@@ -343,13 +455,18 @@ define([ "cm/lib/codemirror",
     },
 
     /**
-     * FIXME: Add indication of the source, such that errors
-     * can be relayed to the proper editor.
+     * Get the source text from a set of editors.  Each source is
+     * preceeded by a line :- '#file'(DocID, Line).
+     *
+     * @param {String} [role] Only return source for editors that
+     * match the given role.
+     * @param {Boolean} [direct] If `true`, do not try to indirect
+     * over the `data.getSource` function.
      * @returns {String} current contents of the editor.  If
      * the jQuery object holds multiple editors, we return the
      * joined content of the editors.
      */
-    getSource: function(role) {
+    getSource: function(role, direct) {
       var src = [];
 
       this.each(function() {
@@ -357,8 +474,19 @@ define([ "cm/lib/codemirror",
 	  var data = $(this).data(pluginName);
 
 	  if ( data ) {
-	    if ( !role || (role == data.role) )
-	      src.push(data.cm.getValue());
+	    if ( !role || (role == data.role) ) {
+	      var mysrc;
+//TBD	      var docid = $(this).prologEditor('docid');
+
+	      if ( typeof(data.getSource) == "function" && !direct ) {
+		mysrc = data.getSource();
+	      } else {
+		mysrc = data.cm.getValue();
+	      }
+//TBD	      if ( role == "source" )
+//TBD		src.push(":- '#file'("+Pengine.stringify(docid)+",1).");
+	      src.push(mysrc);
+	    }
 	  }
 	}
       });
@@ -377,6 +505,22 @@ define([ "cm/lib/codemirror",
 	obj.breakpoints = bps;
 
       return obj;
+    },
+
+    /*
+     * @returns {String} document identifier relating this editor to
+     * the server side document store.
+     */
+    docid: function() {
+      var st;
+
+      if ( this.hasClass("storage") )
+	return this.storage('docid');
+      else if ( (st=this.closest(".storage")) && st.length > 0 ) {
+	stdoc = st.storage('docid');
+	if ( stdoc )
+	  return stdoc + "#" + this.closest(".nb-cell").attr("name");
+      }
     },
 
     /**
@@ -426,8 +570,12 @@ define([ "cm/lib/codemirror",
 	  }
 	}
 
-	if ( data.role == "source" )
-	  $(".swish-event-receiver").trigger("program-loaded", this);
+	if ( data.role == "source" ) {
+	  $(".swish-event-receiver").trigger("program-loaded",
+					     { editor: this,
+					       query: source.query
+					     });
+	}
       }
       return this;
     },
@@ -442,6 +590,33 @@ define([ "cm/lib/codemirror",
     },
 
     /**
+     * Called if the editor changes from clean to dirty or visa versa.
+     * This triggers `data-is-clean`, which is trapped by the tab to
+     * indicate the changed state of the editor.
+     */
+    markClean: function(clean) {
+      var data = this.data(pluginName);
+
+      if ( data.clean_signalled != clean )
+      { data.clean_signalled = clean;
+	this.trigger("data-is-clean", clean);
+      }
+    },
+
+    /**
+     * Set notion of clean for editors that are not associated with a
+     * storage
+     */
+    setIsClean: function() {
+      return this.each(function() {
+	var elem = $(this);
+	var data = elem.data(pluginName);
+	data.cleanGeneration = data.cm.changeGeneration();
+	data.clean_signalled = true;
+      });
+    },
+
+    /**
      * @param {Object} options
      * @param {String} [options.add] Id of pengine to add
      * @param {String} [options.has] Match pengine, returning boolean
@@ -449,15 +624,17 @@ define([ "cm/lib/codemirror",
     pengine: function(options) {
       var data = this.data(pluginName);
 
-      if ( options.add ) {
-	data.pengines = data.pengines || [];
-	if ( data.pengines.indexOf(options.add) < 0 )
-	  data.pengines.push(options.add);
+      if ( data ) {
+	if ( options.add ) {
+	  data.pengines = data.pengines || [];
+	  if ( data.pengines.indexOf(options.add) < 0 )
+	    data.pengines.push(options.add);
 
-	return this;
-      } else if ( options.has ) {
-	return (data.pengines &&
-		data.pengines.indexOf(options.has) >= 0);
+	  return this;
+	} else if ( options.has ) {
+	  return (data.pengines &&
+		  data.pengines.indexOf(options.has) >= 0);
+	}
       }
     },
 
@@ -481,14 +658,14 @@ define([ "cm/lib/codemirror",
 	iframe.contentWindow.print();
       }
 
-      $.ajax({ url: "/swish/js/codemirror/theme/prolog.css",
+      $.ajax({ url: config.http.locations.swish+"js/codemirror/theme/prolog.css",
 	       dataType: "text",
 	       success: function(data) {
 		 printWithIframe($.el.div($.el.style(data),
 					  pre));
 	       },
 	       error: function(jqXHDR) {
-		 modal.ajaxError(jqXHR);
+		 modal.ajaxError(jqXHDR);
 	       }
              });
 
@@ -526,35 +703,42 @@ define([ "cm/lib/codemirror",
     /**
      * Highlight a (syntax) error in the source.
      * @param {Object} error
-     * @param {String} error.data contains the error message
+     * @param {String} error.data contains the error message (HTML
+     * string)
      * @param {Object} error.location contains the location, providing
      * `line` and `ch` attributes.
      */
     highlightError: function(error) {
       if ( error.location.file &&
-	   this.prologEditor('isMyFile', error.location.file) ) {
+	   (error.location.file == true ||
+	    this.prologEditor('isMyFile', error.location.file)) ) {
 	var data = this.data(pluginName);
-	var msg  = $(error.data).text();
-	var left;
+	var chmark;
 
 	if ( error.location.ch ) {
 	  left = data.cm.charCoords({ line: error.location.line-1,
-				      ch:   error.location.ch
+				      ch:   error.location.ch-1
 				    },
 				    "local").left;
-	} else {
-	  left = 0;
+	  chmark = $.el.div({class:"source-msg-charmark"},
+			    $.el.span({class:"glyphicon glyphicon-chevron-up"}));
+	  $(chmark).css("padding-left", left+"px");
 	}
 
-	msg = msg.replace(/^.*?:[0-9][0-9]*: /, "");
-	var elem = $.el.span({class:"source-msg error"},
-			     msg,
-			     $("<span>&times;</span>")[0]);
-	$(elem).css("margin-left", left+"px");
-
+	var elem = $.el.div({ class:"source-msg error error-context",
+			      title:"Error message.  Click to remove"
+			    },
+			    chmark,
+			    $(error.data)[0],
+			    $.el.span({class:"glyphicon glyphicon-remove-circle"}));
 	var widget = data.cm.addLineWidget(error.location.line-1, elem);
 
-	$(elem).on("click", function() {
+	if ( error.error_context )
+	  $(elem).data("error_context", error.error_context);
+	$(elem).on("click", function(ev) {
+	  if ( error.error_handler &&
+	       error.error_handler(ev) == false )
+	    return;
 	  widget.clear();
 	});
 	$(elem).data("cm-widget", widget);
@@ -595,6 +779,25 @@ define([ "cm/lib/codemirror",
 
       return this;
     },
+
+    /**
+     * Execute a command on the editor from the menu.  The trick is to
+     * find the current editor.  For that purpose we make "blur" trigger
+     * the 'prepare' command that sets the last editor.  On the
+     * following menu action we execute on the last editor.
+     */
+   execCommand: function(command) {
+     if ( command == 'prepare' ) {
+       lastEditor = this[0];
+     } else if ( lastEditor == this[0] ) {
+       elem = $(lastEditor);
+       var data = elem.data(pluginName);
+       data.cm.execCommand(command);
+       elem.find(".Codemirror-dialog input").focus();
+     }
+
+     return this;
+   },
 
     /**
      * @param {String} file is the file as known to Prolog,
@@ -671,6 +874,219 @@ define([ "cm/lib/codemirror",
     },
 
     /**
+     * Get the selection for later reuse.
+     * @returns {null|Array} Array of selection descriptions for each
+     * editor in the jQuery object that has a selection.  Each editor
+     * selection contains `editor` and `selections`, where `selections`
+     * is an array of objects with `from`, `to` (line,ch), `string` and
+     * `context`.  The latter two allow for fuzzy restoration of the
+     * selection.
+     */
+    getSelection: function() {
+      var selection = [];
+
+      this.each(function() {
+	var ed   = $(this);
+	var data = ed.data(pluginName);
+
+	if ( data.cm.somethingSelected() == true ) {
+	  var sel    = data.cm.listSelections();
+	  var esel   = {selections:[]};
+
+						/* Hack */
+	  var cell_name = ed.closest(".nb-cell").attr("name");
+	  if ( cell_name )
+	    esel.cell = cell_name;
+
+	  for(var i=0; i<sel.length; i++) {
+	    var s = sel[i];
+	    var sr = {};
+
+	    function cmploc(l1, l2) {
+	      if ( l1.line < l2.line ) return -1;
+	      if ( l1.line > l2.line ) return  1;
+	      if ( l1.ch   < l2.ch   ) return -1;
+	      if ( l1.ch   > l2.ch   ) return  1;
+	      return 0;
+	    }
+	    function sol(pos) {
+	      return {line:pos.line, ch:0};
+	    }
+	    function eol(pos) {
+	      return {line:pos.line, ch:data.cm.getLine(pos.line).length};
+	    }
+	    function cppos(pos) {
+	      return {line:pos.line, ch:pos.ch};
+	    }
+
+	    switch ( cmploc(s.anchor, s.head) )
+	    { case -1:
+		sr.from = cppos(s.anchor);
+	        sr.to   = cppos(s.head);
+		break;
+	      case 1:
+		sr.to   = cppos(s.anchor);
+	        sr.from = cppos(s.head);
+		break;
+	      case 0:
+		continue;
+	    }
+
+	    sr.string  = data.cm.getRange(sr.from, sr.to);
+	    sr.context = data.cm.getRange(sol(sr.from), eol(sr.to));
+
+	    esel.selections.push(sr);
+	  }
+
+	  selection.push(esel);
+	}
+      });
+
+      return selection.length > 0 ? selection : null;
+    },
+
+    /**
+     * @param {Array} sel is the selection to restore
+     * @fixme deal with notebook selections
+     */
+    restoreSelection: function(selection) {
+      function restoreEditorSelection(ed, sel) {
+	var data    = ed.data(pluginName);
+	var cm      = data.cm;
+	var cmsel   = [];
+	var loffset = "";
+
+	function findsel(s) {
+	  if ( cm.getRange(s.from, s.to) == s.string ) {
+	    return {anchor:s.from, head: s.to};
+	  } else {
+	    var start   = cm.firstLine();
+	    var end     = cm.lastLine();
+	    var offset  = 0;
+	    var goffset = 1;
+
+	    function contextMatch(l0, s) {
+	      var lines = s.split("\n");
+	      for(var i=0; i<lines.length; i++) {
+		if ( cm.getLine(l0+i) != lines[i] )
+		  return false;
+	      }
+	      return true;
+	    }
+
+	    function stringMatch(l0, s) {
+	      var lines = s.split("\n");
+	      for(var i=0; i<lines.length; i++) {
+		var cml = cm.getLine(l0);
+		var   l = lines[i];
+		var choff;
+
+		if ( i == 0 ) {
+		  if ( i == lines.length-1 ) {
+		    return cml.indexOf(l);
+		  } else {
+		    choff = cml.indexOf(l);
+
+		    if ( !(choff >= 0 && l.length+choff == cml.length) )
+		      return -1;
+		  }
+		} else if ( i == lines.length-1 ) {
+		  if ( cml.indexOf(l) != 0 )
+		    return -1;
+		} else {
+		  if ( cm.getLine(l0+i) != lines[i] )
+		    return -1;
+		}
+	      }
+	      return choff;			/* ch of selection start */
+	    }
+
+	    function poff(p, l, ch) {
+	      ch = ch||0;
+	      return {line:p.line+l, ch:p.ch+ch};
+	    }
+
+	    while( s.from.line+offset >= start &&
+		   s.to.line+offset <= end ) {
+	      var ch;
+
+	      if ( contextMatch(s.from.line+offset, s.context) )
+		return { anchor:poff(s.from, offset),
+			 head:  poff(s.to,   offset),
+			 offset:offset
+		       };
+	      if ( (ch=stringMatch(s.from.line+offset, s.string)) >= 0 ) {
+		var soff = ch-s.from.ch;
+		var toff = s.to.line != s.from.line ? 0 : soff;
+
+		return { anchor:poff(s.from, offset, soff),
+			 head:  poff(s.to,   offset, toff),
+			 offset:offset
+		       };
+	      }
+
+	      goffset++;
+	      offset = Math.floor(goffset/2);
+	      if ( goffset%2 == 1 )
+		offset = -offset;
+	    }
+	  }
+	}
+
+	for(var i=0; i<sel.length; i++) {
+	  var r = findsel(sel[i]);
+	  if ( r ) {
+	    cmsel.push(r);
+	    if ( r.offset ) {
+	      if ( loffset != "" )
+		loffset += ";";
+	      loffset += r.offset
+	    }
+	  }
+	}
+
+	if ( cmsel.length > 0 )
+	  cm.setSelections(cmsel, 0);
+	if ( loffset != "" || cmsel.length < sel.length ) {
+	  var msg;
+
+	  if ( cmsel.length == sel.length )
+	    msg = "Found selections at offset "+loffset;
+	  else if ( loffset == "" )
+	    msg = "Could not restore all selections";
+	  else
+	    msg = "Only found some selections at offsets " + loffset;
+
+	  modal.feedback({ html: msg, owner: ed });
+	}
+      }
+
+      // Our body
+      if ( selection[0].cell ) {	/* notebook style */
+	var editors = this;
+
+	for(var i=0; i<selection.length; i++) {
+	  var s = selection[i];
+
+	  function findEditor(name) {
+	    for(var i=0; i<editors.length; i++) {
+	      if ( $(editors[i]).closest(".nb-cell").attr("name") == name )
+		return $(editors[i]);
+	    }
+	  }
+
+	  var ed = findEditor(s.cell);
+	  if ( ed )
+	    restoreEditorSelection(ed, s.selections);
+	}
+      } else {				/* plain editor */
+	restoreEditorSelection(this, selection);
+      }
+
+      return this;
+    },
+
+    /**
      * Extract example queries from text.  By   default,  this looks for
      * structured  comment  blocks  labelled   *examples*  and  extracts
      * fragments between `^ *?-` and `.`
@@ -713,19 +1129,73 @@ define([ "cm/lib/codemirror",
     },
 
     /**
+     * Add an example to the examples comment block or create such a
+     * block.
+     */
+    addExample: function(query) {
+      var cm      = this.data(pluginName).cm;
+      var source = this.prologEditor('getSource');
+      var start  = this.prologEditor('search',
+				     /\/\*\* *<?examples>?/igm, {dir:-1,max:1});
+      var end    = this.prologEditor('search', /\*\//, {start:start.line,max:1});
+
+      if ( start.length == 1 )
+      { var end = this.prologEditor('search', /\*\//,
+				    {start:start[0].line, max:1});
+	var current = this.prologEditor('getExamples', source);
+
+	if ( current && current.indexOf(query) != -1 )
+	{ modal.alert("Query is already in examples");
+	  return this;
+	}
+	if ( end.length != 1 )
+	{ modal.alert("/** <examples> block is not terminated with */");
+	  return this;
+	}
+
+	query = query.split("\n").join("\n   ");
+	cm.setSelection({line:end[0].line-1, ch:0});
+	cm.replaceSelection("?- "+query+"\n");
+      } else
+      { cm.setSelection({line:cm.lastLine(), ch:0});
+	cm.replaceSelection("/** <examples>\n" +
+			    "?- "+query+"\n" +
+			    "*/\n");
+      }
+
+      return this;
+    },
+
+    /**
      * @param {RegExp} re is the regular expression to search for
      * @param {Object} [options]
      * @param {number} [options.max] is the max number of hits to return
+     * @param {number} [options.dir=1] is -1 to search backwards
+     * @param {number} [options.start] to start at a given line
+     * @param {number} [options.end] to end at a given line
      * @returns {Array.object} list of objects holding the matching line
      * content and line number.
      */
     search: function(re, options) {
       var cm      = this.data(pluginName).cm;
-      var start   = cm.firstLine();
-      var end     = cm.lastLine();
+      var dir     = options.dir||1;
+      var start   = options.start == undefined ? cm.firstLine() : options.start;
+      var end     = options.end   == undefined ? cm.lastLine()  : options.end;
       var matches = [];
 
-      for(var i=start; i<=end; i++) {
+      if ( (dir == -1 && end > start) ||
+	   (dir == 1 && start > end) )
+      { var tmp = start;
+	start = end;
+	end = tmp;
+      }
+
+      if ( (dir > 0 && start > end) ||
+	   (dir < 0 && start < end) )
+	return matches;
+      end += dir;
+
+      for(var i=start; i!=end; i+=dir) {
 	var line = cm.getLine(i);
 	if ( line.search(re) >= 0 ) {
 	  matches.push({line:i+1, text:line});
@@ -808,7 +1278,18 @@ define([ "cm/lib/codemirror",
 
 	if ( cm._searchMarkers.length > 0 )
 	  cm.on("cursorActivity", clearSearchMarkers);
+      } else {					/* mark entire line */
+	cm._searchMarkers.push(
+	      cm.markText({line:line, ch:0},
+			  {line:line, ch:cm.getLine(line).length},
+			  {className:"CodeMirror-search-match",
+			   clearOnEnter: true,
+			   clearWhenEmpty: true,
+			   title: "Target line"
+			  }));
       }
+
+      return this;
     },
 
     /**
@@ -816,6 +1297,10 @@ define([ "cm/lib/codemirror",
      */
     changeGen: function() {
       return this.data(pluginName).cm.changeGeneration();
+    },
+
+    isClean: function(gen) {
+      return this.data(pluginName).cm.isClean(gen);
     },
 
     /**
@@ -837,6 +1322,9 @@ define([ "cm/lib/codemirror",
       storage.isClean = function(generation) {
 	return data.cm.isClean(generation);
       };
+      storage.markClean = function(clean) {
+	elem.prologEditor('markClean', clean);
+      };
 
       storage.cleanGeneration = data.cm.changeGeneration();
       storage.cleanData       = data.cm.getValue();
@@ -844,8 +1332,153 @@ define([ "cm/lib/codemirror",
 
       this.storage(storage);
       return this;
-    }
+    },
 
+    /**
+     * Act on the current token.  Normally invoked after a long click.
+     */
+    contextAction: function() {
+      var elem  = this;
+      var data  = this.data(pluginName);
+      var here  = data.cm.getCursor();
+      var token = data.cm.getTokenAt(here, true);
+      var et    = data.cm.getEnrichedToken(token);
+      var locations = data.cm.getTokenReferences(et);
+
+      if ( locations && locations.length > 0 ) {
+	var ul = $.el.ul();
+	var select  = $.el.div({class: "goto-source"}, $.el.div("Go to"), ul);
+	var modalel = $.el.div({class: "edit-modal"},
+			       $.el.div({class: "mask"}),
+			       select)
+
+	for(var i=0; i<locations.length; i++) {
+	  var loc = locations[i];
+	  $(ul).append($.el.li($.el.a({'data-locindex':i}, loc.title)));
+	}
+
+	var coord = data.cm.cursorCoords(true);
+	$(select).css({top: coord.bottom, left: coord.left});
+
+	$("body").append(modalel);
+	$(modalel).on("click", function(ev) {
+	  var i = $(ev.target).data('locindex');
+	  $(modalel).remove();
+
+	  if ( i !== undefined ) {
+	    var loc = locations[i];
+
+	    if ( loc.file ) {
+	      elem.closest(".swish").swish('playFile', loc);
+	    } else {
+	      var editor;
+
+	      // If we are the query editor, we must find the related
+	      // program editor.
+	      if ( data.role == "query" ) {
+		editor = elem.closest(".prolog-query-editor")
+			     .queryEditor('getProgramEditor');
+
+		if ( !editor[0] )
+		  modal.alert("No related program editor");
+	      } else
+	      { editor = elem;
+	      }
+
+	      if ( editor && editor[0] )
+		editor.prologEditor('gotoLine', loc.line, loc).focus();
+	    }
+
+	  }
+	});
+
+	$(modalel).show();
+      }
+
+      return this;
+    },
+
+		 /*******************************
+		 *	QUERY MANIPULATION	*
+		 *******************************/
+
+    /**
+     * @param {String} [query] query to get the variables from
+     * @param {Boolean} [anon] if `true`, also include _X variables.
+     * @return {List.string} is a list of Prolog variables without
+     * duplicates
+     */
+
+    variables: function(query, anon) {
+      var qspan = $.el.span({class:"query cm-s-prolog"});
+      var vars = [];
+
+      CodeMirror.runMode(query, "prolog", qspan);
+
+      function addVars(selector) {
+	$(qspan).find(selector).each(function() {
+	  var name = $(this).text();
+	  if ( vars.indexOf(name) < 0 )
+	    vars.push(name);
+	});
+      }
+
+      addVars("span.cm-var");
+      if ( anon )
+	addVars("span.cm-var-2");
+
+      return vars;
+    },
+
+    /**
+     * Wrap current query in a solution modifier.
+     * TBD: If there is a selection, only wrap the selection
+     *
+     * @param {String} wrapper defines the type of wrapper to use.
+     */
+    wrapSolution: function(wrapper) {
+      var query = prolog.trimFullStop(this.prologEditor('getSource', "query"));
+      var that = this;
+      var vars = this.prologEditor('variables', query);
+
+      function wrapQuery(pre, post) {
+	that.prologEditor('setSource', pre + "("+query+")" + post + ".")
+	    .focus();
+	return that;
+      }
+
+      function prefixQuery(pre) {
+	that.prologEditor('setSource', pre + query + ".")
+	    .focus();
+	return that;
+      }
+
+      function order(l) {
+	var order = [];
+	for(var i=0; i<vars.length; i++)
+	  order.push("asc("+vars[i]+")");
+	return order.join(",");
+      }
+
+      switch ( wrapper ) {
+        case "Aggregate (count all)":
+	  return wrapQuery("aggregate_all(count, ", ", Count)");
+	case "Projection":
+	  return prefixQuery("projection(["+vars.join(",")+"]),\n");
+        case "Order by":
+	  return wrapQuery("order_by(["+order(vars)+"], ", ")");
+        case "Distinct":
+	  return wrapQuery("distinct(["+vars.join(",")+"], ", ")");
+        case "Limit":
+	  return wrapQuery("limit(10, ", ")");
+        case "Time":
+	  return wrapQuery("time(", ")");
+        case "Debug (trace)":
+	  return wrapQuery("trace, ", "");
+	default:
+	  alert("Unknown wrapper: \""+wrapper+"\"");
+      }
+    }
   }; // methods
 
   tabbed.tabTypes.program = {
