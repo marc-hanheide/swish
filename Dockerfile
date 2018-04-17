@@ -48,7 +48,7 @@ USER $SWISH_USER
 #RUN cd $SWISH_DIR && make js
   #&& make
 
-RUN echo `date`
+RUN echo
 
 RUN git clone -b old-version-working-for-now https://github.com/marc-hanheide/swish.git $SWISH_DIR
 # \
