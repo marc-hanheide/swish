@@ -48,7 +48,7 @@ USER $SWISH_USER
 #RUN cd $SWISH_DIR && make js
   #&& make
 
-RUN echo
+ADD .git/ORIG_HEAD /tmp/ORIG_HEAD
 
 RUN git clone -b old-version-working-for-now https://github.com/marc-hanheide/swish.git $SWISH_DIR
 # \
@@ -59,9 +59,6 @@ WORKDIR $SWISH_DIR
 
 RUN bower install
 RUN echo ":- use_module(server).\n:- initialization server(3050)." > $SWISH_DIR/run.pl \
-#RUN cd $SWISH_DIR && bower install
-RUN cat Makefile && make -k 
-#RUN cd $SWISH_DIR && make js
 
 
 EXPOSE 3050
