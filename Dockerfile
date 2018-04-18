@@ -36,7 +36,7 @@ ENV LANGUAGE en_US.UTF-8
 RUN useradd -m -s /bin/bash $SWISH_USER \
   && mkdir -p $SWISH_DIR \
   && chown $SWISH_USER $SWISH_DIR
-USER $SWISH_USER
+
 
 #RUN git clone https://github.com/marc-hanheide/swish.git $SWISH_DIR \
 #  # Use global 3050
@@ -50,15 +50,19 @@ USER $SWISH_USER
 
 ADD .git/index /tmp/git-index
 
-RUN git clone -b old-version-working-for-now https://github.com/marc-hanheide/swish.git $SWISH_DIR
+COPY . $SWISH_DIR
+RUN chown -R $SWISH_USER $SWISH_DIR
+
+#RUN git clone -b old-version-working-for-now https://github.com/marc-hanheide/swish.git $SWISH_DIR
 # \
   #&& wget http://www.swi-prolog.org/download/swish/swish-bower-components.zip -P $HOME \
   #&& unzip -o $HOME/swish-bower-components.zip -d $SWISH_DIR
 
+USER $SWISH_USER
 WORKDIR $SWISH_DIR
 
 RUN bower install
-RUN echo ":- use_module(server).\n:- initialization server(3050)." > $SWISH_DIR/run.pl \
+RUN echo ":- use_module(server).\n:- initialization server(3050)." > $SWISH_DIR/run.pl
 
 
 EXPOSE 3050

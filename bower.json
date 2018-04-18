@@ -16,7 +16,6 @@
     "tagmanager": "*",
     "js-sha1": "*",
     "c3": "*",
-    "popper.js": "*",
     "svg-pan-zoom": "*"
   }
 }
